@@ -159,6 +159,12 @@ def add(path: str) -> None:
     _git("add", path)
 
 
+def reset_staged() -> None:
+    """Unstage all staged changes without touching the working tree."""
+    _require_repo()
+    _git("reset", check=False)
+
+
 def remove_from_tracking(path: str) -> None:
     """Remove a file from tracking without deleting it locally."""
     _require_repo()

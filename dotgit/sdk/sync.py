@@ -30,8 +30,18 @@ def track(path: str) -> dict:
     except ValueError:
         return {"success": False, "error": f"Path must be under {work_tree}"}
 
+    # Reset any leftover staged state from previous failed attempts
+    # without touching the working tree or tracked files.
+    repo.reset_staged()
+
     repo.add(str(abs_path))
-    committed = repo.commit(f"Track {rel_path}")
+    try:
+        committed = repo.commit(f"Track {rel_path}")
+    except repo.DotGitError:
+        # Commit failed (e.g., hook rejected) — unstage so we don't
+        # leave dirty state that poisons future commands.
+        repo.reset_staged()
+        raise
     return {
         "success": True,
         "path": str(rel_path),
