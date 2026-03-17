@@ -179,7 +179,11 @@ def commit(message: str, skip_hooks: bool = False) -> bool:
     result = _git("diff", "--cached", "--quiet", check=False, skip_hooks=skip_hooks)
     if result.returncode == 0:
         return False
-    _git("commit", "-m", message, skip_hooks=skip_hooks)
+    try:
+        _git("commit", "-m", message, skip_hooks=skip_hooks)
+    except subprocess.CalledProcessError as e:
+        output = (e.stdout or "") + (e.stderr or "")
+        raise DotGitError(output.strip() or "Commit failed") from None
     return True
 
 

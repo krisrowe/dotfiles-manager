@@ -27,7 +27,11 @@ def main():
 @click.argument("path")
 def track(path: str):
     """Start tracking a file or directory."""
-    result = sync.track(path)
+    try:
+        result = sync.track(path)
+    except repo.DotGitError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
     if not result["success"]:
         click.echo(result["error"], err=True)
         sys.exit(1)
