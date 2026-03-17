@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dotfiles-manager"
+version = "0.1.0"
+description = "Dotfile management CLI wrapping a bare git repo with GitHub sync"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0.0",
+    "mcp>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+dot = "dotgit.cli.main:main"
+dot-mcp = "dotgit.mcp.server:run_server"
+
+[project.urls]
+Homepage = "https://github.com/krisrowe/dotfiles-manager"
+Repository = "https://github.com/krisrowe/dotfiles-manager"
+
+[tool.setuptools.packages.find]
+include = ["dotgit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
