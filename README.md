@@ -1,8 +1,11 @@
 # dotfiles-manager
 
-Back up and sync your dotfiles across machines using git. No new concepts to learn — it's just git under the hood, wrapped in a simple CLI.
+Back up and sync your dotfiles across machines using git. No new concepts
+to learn — it's just git under the hood, wrapped in a simple CLI.
 
-Uses the [Atlassian bare repo pattern](https://www.atlassian.com/git/tutorials/dotfiles): your config files stay where they are, git tracks them invisibly, and GitHub keeps a versioned backup.
+Uses the [Atlassian bare repo pattern](https://www.atlassian.com/git/tutorials/dotfiles):
+your config files stay where they are, git tracks them invisibly, and GitHub
+keeps a versioned backup.
 
 ## Why
 
@@ -11,7 +14,23 @@ Uses the [Atlassian bare repo pattern](https://www.atlassian.com/git/tutorials/d
 - **Full version history**: Roll back any file with `dot git log`
 - **No new mental model**: It's git. If you know git, you know everything
 - **Works without GitHub**: Local-only mode until you're ready to push
+- **Multiple stores**: Manage independent repos from one CLI with `--store`
 - **AI-agent friendly**: MCP server lets Claude or other assistants manage your dotfiles
+
+## Architecture
+
+All business logic lives in the SDK (`dotgit/sdk/`). The CLI and MCP server
+are thin interface layers — they parse arguments, call SDK functions, and
+format output. No business logic in CLI or MCP.
+
+```
+dotgit/
+  sdk/       ← all logic: tracking, syncing, remote setup, hooks, stores
+  cli/       ← thin CLI wrapper (calls SDK, formats for terminal)
+  mcp/       ← thin MCP wrapper (calls SDK, exposes as tool schema)
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and testing details.
 
 ## Install
 
@@ -39,7 +58,20 @@ Each `dot track` commits immediately to a local bare repo at `~/.dotfiles`.
 dot remote setup
 ```
 
-Creates a **private** repo on GitHub (default name: `personal-dotfiles`) using the `gh` CLI.
+Creates a **private** repo on GitHub (default name: `personal-dotfiles`)
+using the `gh` CLI. Sets a `dotfiles-default` topic on the repo for
+discovery on other machines.
+
+`dot remote setup` is idempotent — run it again and it verifies the
+existing configuration. It also validates that the topic is not duplicated
+across multiple repos to ensure `dot restore` can unambiguously find the
+right one.
+
+Use `--repo-name` to choose a different GitHub repo name:
+
+```bash
+dot remote setup --repo-name my-dotfiles
+```
 
 ### 3. Sync
 
@@ -47,16 +79,19 @@ Creates a **private** repo on GitHub (default name: `personal-dotfiles`) using t
 dot sync
 ```
 
-Commits any changes, pulls from GitHub, pushes to GitHub. One command does everything.
+Commits any changes, pulls from GitHub, pushes to GitHub. One command does
+everything.
 
 ## Restore on a New Machine
 
 ```bash
 pipx install git+https://github.com/krisrowe/dotfiles-manager.git
-dot restore git@github.com:YOUR_USERNAME/personal-dotfiles.git
+dot restore git@github.com:YOUR_USERNAME/my-dotfiles.git
 ```
 
-All tracked files are checked out to their original paths. If files already exist at those paths, `dot restore` reports the conflicts and tells you how to resolve them.
+All tracked files are checked out to their original paths. If files already
+exist at those paths, `dot restore` reports the conflicts and tells you how
+to resolve them.
 
 ## Commands
 
@@ -97,15 +132,105 @@ Your global git hooks run on dotfile commits by default. If they interfere:
 | `dot hooks reset` | Restore global hooks |
 | `dot hooks show` | Show current hooks state |
 
-### MCP server
-
-Register as an MCP server for AI assistant integration:
+### Pass-through git
 
 | Command | Description |
 |---------|-------------|
-| `dot mcp install claude` | Register with Claude Code |
-| `dot mcp install claude --scope=project` | Register for current project only |
-| `dot mcp uninstall claude` | Unregister from Claude Code |
+| `dot git <args>` | Run any git command against the dotfiles repo |
+
+```bash
+dot git log --oneline -10       # Recent history
+dot git diff HEAD~1             # Last commit's changes
+dot git blame .bashrc           # Who changed what
+dot git bundle create backup.bundle --all  # Archive entire repo
+```
+
+## Multiple Stores
+
+Manage independent bare repos from one CLI with `--store`. Each store gets
+its own tracking, hooks configuration, git remote, and backup strategy.
+
+Reasons to use multiple stores:
+
+- **Sensitivity levels.** General configuration, personally identifiable
+  information, and credentials/secrets are different classes of data. You
+  may want different pre-commit hooks (or no hooks) and different backup
+  targets for each.
+- **Personas.** Work config vs. personal config, or any other role-based
+  separation.
+- **Backup targets.** Some stores belong on GitHub. Others belong on a
+  hyperscaler cloud repo, a GCS bucket, Google Drive, or as an encrypted
+  bundle on a cloud drive — anywhere that better fits the data's
+  sensitivity or compliance requirements. A private GitHub repo is fine for
+  general config, but it's a weaker container for genuinely sensitive data:
+  a leaked PAT exposes all private repos, visibility is one click from
+  public, and there's no access-review culture around private repos.
+  Separating stores lets you keep sensitive data off GitHub entirely.
+- **Auditability.** Each store is independently listable (`dot --store=<name>
+  list`), making it easy to review what's stored at each classification
+  level, reclassify files between stores, or relocate a store to a
+  different backup target as requirements change.
+
+`--store` is a top-level option that applies to every command. When omitted,
+the default store is used — no behavior change from single-store usage.
+
+```bash
+# Create a second store
+dot stores create work
+
+# All commands work with --store
+dot --store=work track ~/.config/work-app/settings.conf
+dot --store=work remote setup --repo-name my-work-dotfiles
+dot --store=work sync
+dot --store=work hooks disable
+dot --store=work list
+dot --store=work git log
+```
+
+### Store management
+
+| Command | Description |
+|---------|-------------|
+| `dot stores create <name>` | Create a new store at `~/.dotfiles-<name>` |
+| `dot stores list` | Show all registered stores |
+
+### Restoring multiple stores
+
+```bash
+# Restore default store by URL
+dot restore git@github.com:YOUR_USERNAME/my-dotfiles.git
+
+# Restore a named store by URL
+dot --store=work restore git@github.com:YOUR_USERNAME/my-work-dotfiles.git
+
+# Restore a named store by topic (finds dotfiles-work on GitHub)
+dot --store=work restore
+
+# Discover and restore all stores at once
+dot restore --discover
+```
+
+`dot remote setup` sets a `dotfiles-<store-name>` topic on each GitHub
+repo. Topic-based restore uses these topics to find the right repo
+automatically.
+
+## MCP Server
+
+The MCP server exposes the same SDK functions as the CLI, so AI agents
+have the same capabilities. All MCP tools accept an optional `store`
+parameter, matching the CLI `--store` option.
+
+### Register with Claude Code
+
+```bash
+dot mcp install claude
+```
+
+Or register for the current project only:
+
+```bash
+dot mcp install claude --scope=project
+```
 
 Or manually add to your Claude settings:
 
@@ -119,31 +244,28 @@ Or manually add to your Claude settings:
 }
 ```
 
-### Advanced
-
 | Command | Description |
 |---------|-------------|
-| `dot git <args>` | Run any git command against the dotfiles repo |
-
-Examples:
-```bash
-dot git log --oneline -10       # Recent history
-dot git diff HEAD~1             # Last commit's changes
-dot git blame .bashrc           # Who changed what
-dot git bundle create backup.bundle --all  # Archive entire repo to a file
-```
+| `dot mcp install claude` | Register with Claude Code |
+| `dot mcp install claude --scope=project` | Register for current project only |
+| `dot mcp uninstall claude` | Unregister from Claude Code |
 
 ## How It Works
 
-A bare git repo lives at `~/.dotfiles`. Your home directory is the work tree. `showUntrackedFiles = no` means git only sees files you explicitly `dot track`.
+A bare git repo lives at `~/.dotfiles`. Your home directory is the work
+tree. `showUntrackedFiles = no` means git only sees files you explicitly
+`dot track`.
 
 ```
-~/.dotfiles/          ← bare git database (no working tree of its own)
-~/.config/dotgit/exclude  ← gitignore-format excludes (tracked by the repo)
-~/                    ← work tree (your actual home directory)
+~/.dotfiles/    ← bare git database (no working tree of its own)
+~/              ← work tree (your actual home directory)
 ```
 
-Every `dot` command translates to `git --git-dir=~/.dotfiles --work-tree=~ <command>`.
+Every `dot` command translates to
+`git --git-dir=~/.dotfiles --work-tree=~ <command>`.
+
+With multiple stores, each store is a separate bare repo
+(`~/.dotfiles-<name>`) sharing the same `$HOME` work tree.
 
 ## Local-Only Mode
 
@@ -179,7 +301,7 @@ For testing and advanced use. Production uses the defaults.
 |----------|---------|-------------|
 | `DOTGIT_REPO_DIR` | `~/.dotfiles` | Bare repo location |
 | `DOTGIT_WORK_TREE` | `$HOME` | Work tree root |
-| `DOTGIT_CONFIG_DIR` | `~/.config/dotgit` | Config/exclude file location |
+| `DOTGIT_CONFIG_DIR` | `~/.config/dotgit` | Config file location |
 
 ## Development
 
