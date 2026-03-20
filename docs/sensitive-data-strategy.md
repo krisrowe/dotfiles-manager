@@ -62,10 +62,10 @@ There is always an **active store**. All commands (`dot track`, `dot sync`,
 store defaults to `default` and persists across shell sessions.
 
 ```bash
-dot store use sensitive    # switch active store
+dot stores use sensitive   # switch active store
 dot track ~/.config/myapp/secrets.conf
 dot sync
-dot store use default      # switch back
+dot stores use default      # switch back
 ```
 
 This means existing users see **zero behavior change**. If you never create
@@ -102,9 +102,9 @@ at all.
 
 | Command | Description |
 |---------|-------------|
-| `dot store create <name>` | Create a new empty store (init bare repo, register in config) |
-| `dot store use <name>` | Switch the active store |
-| `dot store list` | Show all stores and which is active |
+| `dot stores create <name>` | Create a new empty store (init bare repo, register in config) |
+| `dot stores use <name>` | Switch the active store |
+| `dot stores list` | Show all stores and which is active |
 
 #### Restore with stores
 
@@ -124,7 +124,7 @@ When `--store` is provided, the tool clones the bare repo to
 #### Topic-based discovery
 
 Each store's GitHub repo gets a topic following the convention
-`dotgit-<store-name>` (e.g., `dotgit-default`, `dotgit-sensitive`).
+`dotfiles-<store-name>` (e.g., `dotfiles-default`, `dotfiles-sensitive`).
 `dot remote setup` sets this topic automatically.
 
 On a new machine, discovery finds all your stores:
@@ -133,7 +133,7 @@ On a new machine, discovery finds all your stores:
 dot restore --discover
 ```
 
-This queries `gh repo list --topic dotgit-*` to find all dotgit-managed
+This queries `gh repo list --topic dotfiles-*` to find all dotfiles-managed
 repos, maps each topic to a store name, and restores them. Stores backed
 up outside GitHub (cloud drive, etc.) are not discoverable this way and
 must be restored manually from a bundle file.
@@ -145,9 +145,9 @@ MCP tools expose store management:
 
 | Tool | Description |
 |------|-------------|
-| `dot_store_list` | List all stores and active store |
-| `dot_store_use` | Switch active store |
-| `dot_store_create` | Create a new store |
+| `dot_stores_list` | List all stores and active store |
+| `dot_stores_use` | Switch active store |
+| `dot_stores_create` | Create a new store |
 
 All existing MCP tools (`dot_track`, `dot_sync`, `dot_list`, etc.) continue
 to work unchanged — they operate on whatever store is active. An AI agent
@@ -162,10 +162,10 @@ current repo. With multiple stores, they naturally operate on the active
 store:
 
 ```bash
-dot store use sensitive
+dot stores use sensitive
 dot hooks disable          # disables hooks on the sensitive store only
 
-dot store use default
+dot stores use default
 dot hooks show             # shows "default" — hooks still enabled here
 ```
 
@@ -193,10 +193,10 @@ Starting from a single default store and adding a sensitive store:
 1. **Run a pre-commit scan** on the default store to see what triggers.
 2. **Triage findings.** For each flagged file: scrub and keep in default,
    or move to the sensitive store.
-3. **Create the sensitive store.** `dot store create sensitive`
-4. **Disable hooks on it.** `dot store use sensitive && dot hooks disable`
-5. **Move files.** `dot store use default && dot untrack <file>`, then
-   `dot store use sensitive && dot track <file>`.
+3. **Create the sensitive store.** `dot stores create sensitive`
+4. **Disable hooks on it.** `dot stores use sensitive && dot hooks disable`
+5. **Move files.** `dot stores use default && dot untrack <file>`, then
+   `dot stores use sensitive && dot track <file>`.
 6. **Set up backup** for the sensitive store (bundle to cloud drive, or
    `dot remote setup` if GitHub is acceptable for now).
 7. **Clean default store history** if sensitive data was previously committed
@@ -206,7 +206,7 @@ Starting from a single default store and adding a sensitive store:
 
 Periodic review of the sensitive store helps keep it small and intentional:
 
-- **What is here?** `dot store use sensitive && dot list`
+- **What is here?** `dot stores use sensitive && dot list`
 - **Does it still need to be here?** Credentials may have been rotated,
   config may have been made generic.
 - **Am I comfortable with where it is stored?** If on GitHub, should it
