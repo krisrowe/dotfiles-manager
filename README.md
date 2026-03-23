@@ -170,24 +170,17 @@ its own tracking, hooks configuration, git remote, and backup strategy.
 
 Reasons to use multiple stores:
 
-- **Sensitivity levels.** General configuration, personally identifiable
-  information, and credentials/secrets are different classes of data. You
-  may want different pre-commit hooks (or no hooks) and different backup
-  targets for each.
+- **Sensitivity levels.** Different pre-commit hooks (or no hooks) and
+  different backup targets for different classes of data.
 - **Personas.** Work config vs. personal config, or any other role-based
   separation.
-- **Backup targets.** Some stores belong on GitHub. Others belong on a
-  hyperscaler cloud repo, a GCS bucket, Google Drive, or as an encrypted
-  bundle on a cloud drive — anywhere that better fits the data's
-  sensitivity or compliance requirements. A private GitHub repo is fine for
-  general config, but it's a weaker container for genuinely sensitive data:
-  a leaked PAT exposes all private repos, visibility is one click from
-  public, and there's no access-review culture around private repos.
-  Separating stores lets you keep sensitive data off GitHub entirely.
-- **Auditability.** Each store is independently listable (`dot --store=<name>
-  list`), making it easy to review what's stored at each classification
-  level, reclassify files between stores, or relocate a store to a
-  different backup target as requirements change.
+- **Backup targets.** GitHub, a self-hosted git server, a cloud drive
+  bundle, or anywhere else — each store can back up independently.
+- **Auditability.** Each store is independently listable
+  (`dot --store=<name> list`), making it easy to review and reclassify.
+
+See [Store Patterns](docs/store-patterns.md) for an example multi-store
+setup separating config, personal data, and secrets.
 
 `--store` is a top-level option that applies to every command. When omitted,
 the default store is used — no behavior change from single-store usage.
@@ -266,16 +259,6 @@ dot git bundle create ~/dotfiles-backup.bundle --all
 ```
 
 Put that file on Google Drive, a USB stick, wherever.
-
-## Environment Variables
-
-For testing and advanced use. Production uses the defaults.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DOTGIT_REPO_DIR` | `~/.dotfiles` | Bare repo location |
-| `DOTGIT_WORK_TREE` | `$HOME` | Work tree root |
-| `DOTGIT_CONFIG_DIR` | `~/.config/dotgit` | Config file location |
 
 ## Development
 
