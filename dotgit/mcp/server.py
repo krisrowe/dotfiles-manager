@@ -8,7 +8,7 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ..sdk import sync, exclude, remote, repo, stores
+from ..sdk import sync, exclude, remote, repo, stores, ignore
 from ..sdk.config import set_current_store
 
 mcp = FastMCP("dotgit")
@@ -431,6 +431,59 @@ async def dot_stores_create(
         return stores.create(name)
     except stores.StoreError as e:
         return {"success": False, "error": str(e)}
+
+
+# =========================================================================
+# Ignore tools
+# =========================================================================
+
+
+@mcp.tool(
+    name="dot_ignore_init",
+    description="""Initialize the global gitignore with standard patterns.
+
+Ensures ~/.config/git/ignore exists with patterns for credential files
+(.credentials.json, client_secrets.json) so they are never accidentally
+committed to any git repo. Also adds these patterns to each dot store's
+exclude file.
+
+Idempotent — safe to call multiple times. Tracks the global gitignore
+file in the default store so it syncs across machines.""",
+)
+async def dot_ignore_init() -> dict:
+    return ignore.init()
+
+
+@mcp.tool(
+    name="dot_ignore_add",
+    description="""Add a pattern to the global gitignore.
+
+The pattern is added to ~/.config/git/ignore and also to each dot
+store's exclude file. Idempotent — adding the same pattern twice
+is a no-op.""",
+)
+async def dot_ignore_add(
+    pattern: str = Field(description="Gitignore-format pattern to add"),
+) -> dict:
+    return ignore.add(pattern)
+
+
+@mcp.tool(
+    name="dot_ignore_remove",
+    description="""Remove a pattern from the global gitignore.""",
+)
+async def dot_ignore_remove(
+    pattern: str = Field(description="Exact pattern string to remove"),
+) -> dict:
+    return ignore.remove(pattern)
+
+
+@mcp.tool(
+    name="dot_ignore_list",
+    description="""List all patterns in the global gitignore.""",
+)
+async def dot_ignore_list() -> dict:
+    return ignore.list_patterns()
 
 
 # =========================================================================

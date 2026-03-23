@@ -8,7 +8,7 @@ import sys
 
 import click
 
-from ..sdk import sync, exclude, remote, repo, stores
+from ..sdk import sync, exclude, remote, repo, stores, ignore
 from ..sdk.config import set_current_store
 
 
@@ -327,6 +327,62 @@ def mcp_uninstall(target: str, scope: str):
             click.echo(f"Unregistered dotgit MCP server from {settings_path}")
         else:
             click.echo("dotgit MCP server not registered")
+
+
+# =========================================================================
+# Ignore commands
+# =========================================================================
+
+
+@main.group("ignore")
+def ignore_group():
+    """Manage global gitignore patterns."""
+    pass
+
+
+@ignore_group.command("init")
+def ignore_init():
+    """Ensure global gitignore has standard patterns and is tracked."""
+    result = ignore.init()
+    if result["added"]:
+        for p in result["added"]:
+            click.echo(f"  Added: {p}")
+    else:
+        click.echo("  All standard patterns already present.")
+    click.echo(f"  File: {result['file']}")
+
+
+@ignore_group.command("add")
+@click.argument("pattern")
+def ignore_add(pattern: str):
+    """Add a pattern to the global gitignore."""
+    result = ignore.add(pattern)
+    if result.get("added"):
+        click.echo(f"Ignored: {pattern}")
+    else:
+        click.echo(result.get("message", "Already ignored."))
+
+
+@ignore_group.command("remove")
+@click.argument("pattern")
+def ignore_remove(pattern: str):
+    """Remove a pattern from the global gitignore."""
+    result = ignore.remove(pattern)
+    if not result["success"]:
+        click.echo(result["error"], err=True)
+        sys.exit(1)
+    click.echo(f"Removed: {pattern}")
+
+
+@ignore_group.command("list")
+def ignore_list():
+    """Show current global gitignore patterns."""
+    result = ignore.list_patterns()
+    if not result["patterns"]:
+        click.echo("No global gitignore patterns.")
+    else:
+        for p in result["patterns"]:
+            click.echo(f"  {p}")
 
 
 # =========================================================================
