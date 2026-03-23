@@ -60,7 +60,7 @@ def init() -> Path:
     repo_dir = get_repo_dir()
     if not is_initialized():
         subprocess.run(
-            ["git", "init", "--bare", str(repo_dir)],
+            ["git", "init", "--bare", "-b", "main", str(repo_dir)],
             capture_output=True, text=True, check=True,
         )
 
@@ -182,9 +182,21 @@ def status() -> list[dict]:
 
 
 def list_tracked() -> list[str]:
-    """List all tracked files (relative to work tree)."""
+    """List all tracked files (relative to work tree).
+
+    Uses ls-tree against HEAD rather than ls-files (the index),
+    because the index can get out of sync in bare repo setups.
+    Runs without --work-tree since ls-tree reads the committed
+    tree, not the working directory.
+    """
     _require_repo()
-    result = _git("ls-files")
+    repo_dir = get_repo_dir()
+    result = subprocess.run(
+        ["git", f"--git-dir={repo_dir}", "ls-tree", "-r", "--name-only", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return []
     return [f for f in result.stdout.strip().splitlines() if f]
 
 
