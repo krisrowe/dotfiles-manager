@@ -32,7 +32,6 @@ def setup(repo_name: str | None = None) -> dict:
         repo_name: GitHub repo name. Defaults to 'personal-dotfiles'.
     """
     repo.init()
-    name = repo_name or DEFAULT_REPO_NAME
 
     # Check gh is available
     if not _gh_available():
@@ -43,8 +42,28 @@ def setup(repo_name: str | None = None) -> dict:
     if not user:
         return {"success": False, "error": "Not authenticated with gh. Run: gh auth login"}
 
-    full_name = f"{user}/{name}"
     topic = _topic_for_store()
+
+    # Discovery: if no repo name given, look for an existing repo with the topic
+    if not repo_name:
+        existing_repos = _find_repos_with_topic(topic, user)
+        if len(existing_repos) == 1:
+            name = existing_repos[0].get("nameWithOwner", "").split("/")[-1]
+        elif len(existing_repos) > 1:
+            names = [r.get("nameWithOwner", "") for r in existing_repos]
+            return {
+                "success": False,
+                "error": (
+                    f"Multiple repos have topic '{topic}': {', '.join(names)}. "
+                    f"Remove the topic from all but one, or pass --repo-name explicitly."
+                ),
+            }
+        else:
+            name = DEFAULT_REPO_NAME
+    else:
+        name = repo_name
+
+    full_name = f"{user}/{name}"
 
     # Validate topic uniqueness before doing anything else
     topic_error = _validate_topic(topic, full_name, user)
@@ -60,7 +79,7 @@ def setup(repo_name: str | None = None) -> dict:
                 "success": False,
                 "error": f"Repo {full_name} exists but is PUBLIC. Dotfiles must be private.",
             }
-        url = existing.get("sshUrl") or existing.get("url")
+        url = _preferred_url(existing)
     else:
         # Create private repo
         result = subprocess.run(
@@ -73,7 +92,7 @@ def setup(repo_name: str | None = None) -> dict:
 
         # Get URL
         info = _gh_repo_info(full_name)
-        url = info.get("sshUrl") or info.get("url") if info else f"git@github.com:{full_name}.git"
+        url = _preferred_url(info) if info else f"https://github.com/{full_name}.git"
 
     # Ensure topic is set on the repo (idempotent)
     subprocess.run(
@@ -103,6 +122,18 @@ def show() -> dict:
         return {"configured": False, "error": "No remote configured"}
 
     return {"configured": True, "url": url}
+
+
+def _preferred_url(repo_info: dict) -> str:
+    """Pick SSH or HTTPS URL based on gh auth git-protocol."""
+    result = subprocess.run(
+        ["gh", "auth", "status", "--show-token"],
+        capture_output=True, text=True, check=False,
+    )
+    # If gh is configured for HTTPS (default), prefer HTTPS URL
+    if "git_protocol: ssh" not in result.stderr.lower():
+        return repo_info.get("url", "") + ".git" if repo_info.get("url") else repo_info.get("sshUrl", "")
+    return repo_info.get("sshUrl") or repo_info.get("url", "")
 
 
 def _gh_available() -> bool:

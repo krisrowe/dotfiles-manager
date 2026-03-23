@@ -279,13 +279,35 @@ def push() -> None:
 
 
 def pull() -> None:
-    """Pull from origin with rebase. No-op if no remote or no upstream."""
+    """Pull from origin with rebase.
+
+    Handles the 'new machine' case: if the local branch has no commits
+    but the remote does, reset the local branch to match the remote and
+    check out all files.
+    """
     _require_repo()
     if not has_remote():
         return
     result = _git("fetch", "origin", check=False)
     if result.returncode != 0:
         return
+
+    # Detect "new machine" state: no local commits yet
+    has_local = _git("rev-parse", "HEAD", check=False).returncode == 0
+
+    if not has_local:
+        # Check if remote has a branch we can adopt
+        branch_result = _git("branch", "--show-current", check=False)
+        branch = (branch_result.stdout.strip() or "main")
+        remote_ref = f"origin/{branch}"
+        remote_exists = _git("rev-parse", remote_ref, check=False)
+        if remote_exists.returncode == 0:
+            _git("reset", remote_ref)
+            _git("checkout", "HEAD", "--", str(get_work_tree()), check=False)
+            _git("branch", f"--set-upstream-to={remote_ref}", branch,
+                 check=False)
+        return
+
     tracking = _git(
         "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
         check=False,
