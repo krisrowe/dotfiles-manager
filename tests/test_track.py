@@ -83,3 +83,28 @@ def test_list_after_tracking(dotgit_env):
     sync.track(str(test_file))
     result = sync.get_list()
     assert any(".vimrc" in f for f in result["files"])
+
+
+def test_track_outside_work_tree(dotgit_env, tmp_path):
+    """Tracking a file outside the work tree fails."""
+    outside = tmp_path / "outside" / "file.txt"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("nope")
+
+    result = sync.track(str(outside))
+    assert not result["success"]
+    assert "must be under" in result["error"]
+
+
+def test_track_same_file_twice_is_idempotent(dotgit_env):
+    """Tracking an already-tracked file doesn't error."""
+    home = dotgit_env["home_dir"]
+    test_file = home / ".bashrc"
+    test_file.write_text("first")
+
+    result1 = sync.track(str(test_file))
+    assert result1["success"]
+
+    result2 = sync.track(str(test_file))
+    assert result2["success"]
+    assert not result2["committed"]  # Nothing new to commit

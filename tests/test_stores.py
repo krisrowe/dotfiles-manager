@@ -68,6 +68,26 @@ def test_create_store_name_must_start_with_alphanumeric(store_env):
         stores.create("-bad")
 
 
+def test_create_store_uppercase_rejected(store_env):
+    """Store names must be lowercase."""
+    with pytest.raises(stores.StoreError, match="Invalid"):
+        stores.create("MyStore")
+
+
+def test_create_store_numbers_ok(store_env):
+    """Numeric store names are valid."""
+    result = stores.create("store2")
+    assert result["success"]
+    assert result["created"]
+
+
+def test_create_store_hyphens_ok(store_env):
+    """Hyphens in the middle of store names are valid."""
+    result = stores.create("my-extras")
+    assert result["success"]
+    assert result["created"]
+
+
 # =========================================================================
 # Store resolution via config.get_repo_dir()
 # =========================================================================
@@ -230,6 +250,39 @@ def test_exclude_migration_from_config_dir(store_env):
     content = new_exclude.read_text()
     assert "*.log" in content
     assert "*.tmp" in content
+
+
+def test_sync_per_store_isolated(store_env, monkeypatch):
+    """Syncing one store doesn't affect another."""
+    home = store_env["home_dir"]
+
+    # Track and modify a file in default store
+    file_a = home / ".bashrc"
+    file_a.write_text("default config")
+    sync.track(str(file_a))
+    file_a.write_text("modified default")
+
+    # Create work store, track a different file
+    work_repo_dir = store_env["repo_dir"].parent / "work-repo"
+    stores.create("work")
+    monkeypatch.setenv("DOTGIT_REPO_DIR", str(work_repo_dir))
+    repo.init()
+    repo.hooks_disable()
+
+    file_b = home / ".workrc"
+    file_b.write_text("work config")
+    sync.track(str(file_b))
+    file_b.write_text("modified work")
+
+    # Sync work store
+    result = sync.sync()
+    assert result["success"]
+    assert any("Committed" in a for a in result["actions"])
+
+    # Default store should still have uncommitted changes
+    monkeypatch.setenv("DOTGIT_REPO_DIR", str(store_env["repo_dir"]))
+    status = sync.get_status()
+    assert any(c["path"].endswith(".bashrc") for c in status["changes"])
 
 
 def test_exclude_migration_skips_empty_file(store_env):

@@ -56,3 +56,36 @@ def test_sync_skip_hooks(dotgit_env):
     test_file.write_text("export FOO=baz")
     result = sync.sync(skip_hooks=True)
     assert result["success"]
+
+
+def test_auto_commit_message_single_file(dotgit_env):
+    """Single-file change gets a descriptive commit message."""
+    home = dotgit_env["home_dir"]
+    test_file = home / ".bashrc"
+    test_file.write_text("original")
+    sync.track(str(test_file))
+
+    test_file.write_text("modified")
+    sync.sync()
+
+    # Check the commit message
+    result = repo.git_passthrough(["log", "--oneline", "-1"])
+    assert ".bashrc" in result.stdout
+
+
+def test_auto_commit_message_multiple_files(dotgit_env):
+    """Multi-file change gets a summary commit message."""
+    home = dotgit_env["home_dir"]
+    file_a = home / ".bashrc"
+    file_b = home / ".vimrc"
+    file_a.write_text("original a")
+    file_b.write_text("original b")
+    sync.track(str(file_a))
+    sync.track(str(file_b))
+
+    file_a.write_text("modified a")
+    file_b.write_text("modified b")
+    sync.sync()
+
+    result = repo.git_passthrough(["log", "--oneline", "-1"])
+    assert "Sync 2 file(s)" in result.stdout
