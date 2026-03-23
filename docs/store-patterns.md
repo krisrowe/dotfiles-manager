@@ -87,6 +87,14 @@ dot --store=secrets git bundle create ~/cloud-drive/secrets.bundle --all
 service account credentials, SSH private keys, anything that grants
 access to a system.
 
+**What does NOT go here:** OAuth refresh tokens or session credentials
+for major cloud or device accounts (Google, Apple, Microsoft, etc.)
+that act as master keys to an entire ecosystem of services. Compromise
+of one of these tokens — even from a private bundle on a cloud drive —
+becomes a single point of failure for everything tied to that identity.
+These are the one class of credential users should re-authenticate
+locally on each machine rather than backing up and restoring.
+
 ## Periodic Review
 
 Each store is independently listable, making it easy to audit what's
