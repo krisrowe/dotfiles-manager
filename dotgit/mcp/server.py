@@ -8,9 +8,15 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ..sdk import sync, exclude, remote, repo
+from ..sdk import sync, exclude, remote, repo, stores
+from ..sdk.config import set_current_store
 
 mcp = FastMCP("dotgit")
+
+
+def _set_store(store: Optional[str]) -> None:
+    """Set the active store for this invocation."""
+    set_current_store(store)
 
 
 # =========================================================================
@@ -43,9 +49,14 @@ NEXT STEPS after calling this:
 - If user wants to back up: call dot_sync
 - If user wants to see what's tracked: call dot_list
 - If user wants to add a file: call dot_track
-- If user wants to check remote: call dot_remote_show""",
+- If user wants to check remote: call dot_remote_show
+
+MULTI-STORE: Pass the store parameter to target a named store.""",
 )
-async def dot_status() -> dict:
+async def dot_status(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     return sync.get_status()
 
 
@@ -61,7 +72,10 @@ Returns paths relative to the user's home directory. Use this to:
 
 If initialized=false, the repo hasn't been set up yet.""",
 )
-async def dot_list() -> dict:
+async def dot_list(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     return sync.get_list()
 
 
@@ -94,7 +108,9 @@ commits locally — it does not push to the remote.""",
 )
 async def dot_track(
     path: str = Field(description="Absolute path to file or directory to track"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     return sync.track(path)
 
 
@@ -115,7 +131,9 @@ After untracking, the file won't appear in dot_list or dot_status.""",
 )
 async def dot_untrack(
     path: str = Field(description="Absolute path to file or directory to stop tracking"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     return sync.untrack(path)
 
 
@@ -148,58 +166,17 @@ PREREQUISITES:
 
 CONFLICT HANDLING: If the pull encounters a merge conflict (extremely
 rare for single-user dotfiles), sync will bail out. Tell the user to
-resolve manually with 'dot git' commands:
-  dot git status        — see what's conflicted
-  dot git diff          — see the conflict markers
-  dot git checkout --theirs <file>  — accept remote version
-  dot git checkout --ours <file>    — keep local version
-  dot git add <file>    — mark resolved
-  dot git rebase --continue  — finish the rebase
-Then run dot_sync again.""",
+resolve manually with 'dot git' commands.""",
 )
 async def dot_sync(
     skip_hooks: bool = Field(
         default=False,
         description="Skip git hooks for this invocation only. Use only when the user explicitly requests it.",
     ),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     return sync.sync(skip_hooks=skip_hooks)
-
-
-@mcp.tool(
-    name="dot_restore",
-    description="""Restore dotfiles from GitHub onto a new machine.
-
-USE WHEN: The user is on a fresh machine (or fresh OS install) and wants
-to restore their dotfiles from a previously configured GitHub repo.
-
-WHAT HAPPENS:
-1. Clones the bare repo from the provided GitHub URL
-2. Configures the repo (showUntrackedFiles=no, excludesFile)
-3. Checks out all tracked files to their original home-relative paths
-
-PREREQUISITES:
-- dotgit must be installed (pipx install git+https://github.com/krisrowe/dotfiles-manager.git)
-- SSH key or HTTPS credentials configured for GitHub
-- The repo must NOT already exist locally (if it does, use dot_sync instead)
-
-CONFLICT HANDLING: If files already exist at the target paths (common
-when the OS creates default .bashrc etc.), checkout will fail. The tool
-reports which files conflict. Tell the user:
-  1. Review each conflicting file — decide if they want the local or repo version
-  2. Move or delete conflicting files they want to replace
-  3. Run: dot git checkout
-  4. Then: dot sync
-
-DO NOT call dot_restore if dot_status shows initialized=true.
-Use dot_sync instead to pull changes.""",
-)
-async def dot_restore(
-    repo_url: str = Field(
-        description="GitHub repo SSH URL, e.g. git@github.com:USERNAME/personal-dotfiles.git"
-    ),
-) -> dict:
-    return sync.restore(repo_url)
 
 
 # =========================================================================
@@ -221,16 +198,16 @@ COMMON PATTERNS:
 - '.config/*/cache/'   — App cache directories
 - '*.swp'              — Vim swap files
 
-The exclude file is stored at ~/.config/dotgit/exclude and is itself
-tracked by dotgit, so exclude patterns persist across machines via
-dot_sync.
+The exclude file is stored inside the bare repo and is per-store.
 
 TIP: Add exclude patterns BEFORE tracking a directory to avoid
 accidentally committing unwanted files.""",
 )
 async def dot_exclude_add(
     pattern: str = Field(description="Gitignore-format pattern to exclude"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     return exclude.add(pattern)
 
 
@@ -244,7 +221,9 @@ dot_track them explicitly (showUntrackedFiles is off).""",
 )
 async def dot_exclude_remove(
     pattern: str = Field(description="Exact pattern string to remove (must match exactly)"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     return exclude.remove(pattern)
 
 
@@ -252,10 +231,13 @@ async def dot_exclude_remove(
     name="dot_exclude_list",
     description="""List all current exclude patterns.
 
-Shows the active gitignore-format patterns from ~/.config/dotgit/exclude.
-Comments and blank lines are filtered out.""",
+Shows the active gitignore-format patterns. Comments and blank lines
+are filtered out.""",
 )
-async def dot_exclude_list() -> dict:
+async def dot_exclude_list(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     return exclude.list_patterns()
 
 
@@ -270,14 +252,13 @@ async def dot_exclude_list() -> dict:
 
 FIRST-TIME SETUP: Call this after dot_track to set up the GitHub remote
 before the first dot_sync. Creates a private repo on GitHub using the
-gh CLI, sets the 'dotfiles' topic, and configures it as the origin remote.
+gh CLI, sets a dotfiles-<store-name> topic, and configures it as the
+origin remote.
 
 IDEMPOTENT: Safe to call multiple times. If the repo already exists,
 verifies it's private and updates the remote URL if needed.
 
 SAFETY: Refuses to proceed if the GitHub repo exists but is PUBLIC.
-Dotfiles should always be private since they may reference sensitive
-paths or configuration.
 
 PREREQUISITES:
 - gh CLI must be installed (https://cli.github.com)
@@ -292,7 +273,9 @@ async def dot_remote_setup(
         default=None,
         description="GitHub repo name. Default: 'personal-dotfiles'",
     ),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     return remote.setup(repo_name)
 
 
@@ -305,7 +288,10 @@ for dot_restore on another machine.
 
 If configured=false, the user needs to run dot_remote_setup first.""",
 )
-async def dot_remote_show() -> dict:
+async def dot_remote_show(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     return remote.show()
 
 
@@ -319,16 +305,16 @@ async def dot_remote_show() -> dict:
     description="""Persistently disable git hooks on the dotfiles bare repo.
 
 Sets core.hooksPath=/dev/null in the bare repo's git config. This
-persists until dot_hooks_reset is called. Only affects the dotfiles
-repo — all other git repos on the machine are unaffected.
+persists until dot_hooks_reset is called. Only affects the targeted
+store — all other stores and git repos are unaffected.
 
-USE WHEN: The user's global pre-commit hooks (e.g., pre-commit hooks)
-interfere with dotfile commits, causing errors or slowdowns.
-
-This is a persistent setting on the machine where it's run. Other
-machines are not affected.""",
+USE WHEN: The user's global pre-commit hooks interfere with dotfile
+commits, causing errors or slowdowns.""",
 )
-async def dot_hooks_disable() -> dict:
+async def dot_hooks_disable(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     try:
         repo.hooks_disable()
         return {"success": True, "state": "disabled"}
@@ -341,9 +327,12 @@ async def dot_hooks_disable() -> dict:
     description="""Restore global git hooks on the dotfiles repo.
 
 Removes the core.hooksPath override, so the user's global hooks
-(e.g., pre-commit hooks) will run on dotfile commits again.""",
+will run on dotfile commits again.""",
 )
-async def dot_hooks_reset() -> dict:
+async def dot_hooks_reset(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     try:
         repo.hooks_reset()
         return {"success": True, "state": "default"}
@@ -360,12 +349,53 @@ Returns one of:
 - 'disabled' — hooks are off (dot_hooks_disable was called)
 - 'custom (path)' — hooks point to a custom path""",
 )
-async def dot_hooks_show() -> dict:
+async def dot_hooks_show(
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
     try:
         state = repo.hooks_status()
         return {"state": state}
     except repo.DotGitError as e:
         return {"error": str(e)}
+
+
+# =========================================================================
+# Stores tools
+# =========================================================================
+
+
+@mcp.tool(
+    name="dot_stores_list",
+    description="""List all registered dotfile stores.
+
+Always includes the default store. Additional stores appear after
+being created with dot_stores_create.""",
+)
+async def dot_stores_list() -> dict:
+    return stores.list_stores()
+
+
+@mcp.tool(
+    name="dot_stores_create",
+    description="""Create a new named dotfile store.
+
+Creates a bare repo at ~/.dotfiles-<name> and registers it. After
+creation, use the store parameter on other tools to target it.
+
+Example workflow:
+1. dot_stores_create(name="work")
+2. dot_hooks_disable(store="work")
+3. dot_track(path="~/.config/work-app/config", store="work")
+4. dot_sync(store="work")""",
+)
+async def dot_stores_create(
+    name: str = Field(description="Store name (lowercase, alphanumeric, hyphens)"),
+) -> dict:
+    try:
+        return stores.create(name)
+    except stores.StoreError as e:
+        return {"success": False, "error": str(e)}
 
 
 # =========================================================================
@@ -386,22 +416,13 @@ COMMON USES:
 - dot_git(["diff", "HEAD~1"])           — see last commit's changes
 - dot_git(["blame", ".claude/CLAUDE.md"]) — who changed what
 - dot_git(["checkout", "--", ".bashrc"]) — discard local changes to a file
-- dot_git(["status"])                   — raw git status output
-
-CONFLICT RESOLUTION (after failed dot_sync):
-- dot_git(["status"])                   — see conflicted files
-- dot_git(["diff"])                     — see conflict markers
-- dot_git(["checkout", "--theirs", "<file>"])  — accept remote
-- dot_git(["checkout", "--ours", "<file>"])    — keep local
-- dot_git(["add", "<file>"])            — mark resolved
-- dot_git(["rebase", "--continue"])     — finish rebase
-
-RESTORE CONFLICT RESOLUTION (after failed dot_restore):
-- dot_git(["checkout"])                 — retry after user moved conflicting files""",
+- dot_git(["status"])                   — raw git status output""",
 )
 async def dot_git(
     args: list[str] = Field(description="Git subcommand and arguments as a list of strings"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
 ) -> dict:
+    _set_store(store)
     try:
         result = repo.git_passthrough(args)
         return {

@@ -47,8 +47,9 @@ def dotgit_env(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Test")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 
-    # Initialize the bare repo and disable hooks
-    from dotgit.sdk import repo
+    # Reset store state and initialize the bare repo
+    from dotgit.sdk import config, repo
+    config.set_current_store(None)
     repo.init()
     repo.hooks_disable()
 

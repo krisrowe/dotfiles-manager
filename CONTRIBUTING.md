@@ -8,7 +8,7 @@ All business logic lives in `dotgit/sdk/`. CLI and MCP are thin wrappers that ca
 
 - `sdk/config.py` — Path resolution with env var overrides, store resolution
 - `sdk/repo.py` — All git operations against the bare repo
-- `sdk/sync.py` — High-level workflows: track, untrack, sync, restore
+- `sdk/sync.py` — High-level workflows: track, untrack, sync
 - `sdk/stores.py` — Store management: create, list, path resolution
 - `sdk/exclude.py` — Exclude pattern management
 - `sdk/remote.py` — GitHub remote setup via `gh` CLI
@@ -41,7 +41,7 @@ Every path is resolved through a `get_*()` function in `config.py` that checks a
 
 ### Bail Out on Conflicts
 
-When `dot sync` hits a merge conflict or `dot restore` finds existing files, the tool reports what happened and stops. It tells the user to resolve via `dot git` commands. No automatic merge UI, no backup-and-retry.
+When `dot sync` hits a merge conflict, the tool reports what happened and stops. It tells the user to resolve via `dot git` commands. No automatic merge UI, no backup-and-retry.
 
 ### Hooks: Two Mechanisms
 
@@ -87,7 +87,7 @@ stores:
 3. If the topic is on the correct repo: confirms valid state, exits
    successfully.
 4. If the topic is on a different repo: **errors** — a duplicate topic
-   would make `dot restore` ambiguous. The user must resolve the conflict
+   would make topic-based setup ambiguous. The user must resolve the conflict
    manually (remove the topic from the wrong repo).
 5. If no repo has the topic: creates the repo (if needed) and applies the
    topic.

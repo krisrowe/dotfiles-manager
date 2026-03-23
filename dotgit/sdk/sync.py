@@ -6,7 +6,7 @@ Orchestrates track/untrack/sync/restore workflows using repo primitives.
 import subprocess
 from pathlib import Path
 
-from .config import get_repo_dir, get_work_tree, get_exclude_file, get_config_dir
+from .config import get_repo_dir, get_work_tree
 from . import repo
 
 
@@ -17,7 +17,6 @@ def track(path: str) -> dict:
     Returns dict with tracked path info.
     """
     repo.init()
-    _ensure_exclude_file()
 
     abs_path = Path(path).expanduser().resolve()
     work_tree = get_work_tree()
@@ -112,7 +111,6 @@ def sync(skip_hooks: bool = False) -> dict:
     Returns dict describing what happened.
     """
     repo.init()
-    _ensure_exclude_file()
 
     actions = []
 
@@ -139,65 +137,6 @@ def sync(skip_hooks: bool = False) -> dict:
         actions.append("No remote configured — skipped push/pull")
 
     return {"success": True, "actions": actions}
-
-
-def restore(repo_url: str) -> dict:
-    """Clone from GitHub and checkout dotfiles to home directory.
-
-    If files conflict, reports them and stops. User must resolve
-    manually (move/delete conflicting files) then run 'dot git checkout'.
-    """
-    repo_dir = get_repo_dir()
-
-    if repo.is_initialized():
-        return {
-            "success": False,
-            "error": "Repo already exists. Use 'dot sync' to pull changes.",
-        }
-
-    # Clone bare
-    subprocess.run(
-        ["git", "clone", "--bare", repo_url, str(repo_dir)],
-        capture_output=True, text=True, check=True,
-    )
-
-    # Configure
-    repo.init()  # Sets showUntrackedFiles, excludesFile
-
-    # Try checkout
-    result = repo.git_passthrough(["checkout"])
-    if result.returncode == 0:
-        return {"success": True, "actions": ["Cloned and checked out all files"]}
-
-    # Checkout failed — report conflicts
-    conflicting = _parse_checkout_conflicts(result.stderr)
-    if conflicting:
-        return {
-            "success": False,
-            "error": "Checkout blocked by existing files",
-            "conflicting_files": conflicting,
-            "hint": "Move or delete the listed files, then run: dot git checkout",
-        }
-
-    return {
-        "success": False,
-        "error": f"Checkout failed: {result.stderr}",
-    }
-
-
-def _ensure_exclude_file():
-    """Ensure the exclude file exists and is tracked."""
-    exclude_file = get_exclude_file()
-    if not exclude_file.exists():
-        exclude_file.parent.mkdir(parents=True, exist_ok=True)
-        exclude_file.write_text(
-            "# dotgit exclude file (gitignore format)\n"
-            "# Managed by 'dot exclude' commands\n"
-        )
-    # Track the config dir
-    config_dir = get_config_dir()
-    if config_dir.exists():
-        repo.add(str(config_dir))
 
 
 def _auto_commit_message(changes: list[dict]) -> str:

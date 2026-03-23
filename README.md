@@ -10,7 +10,7 @@ keeps a versioned backup.
 ## Why
 
 - **One command to back up**: `dot sync` commits and pushes everything
-- **One command to restore**: `dot restore <url>` on a new machine
+- **One command to set up a new machine**: `dot remote setup` + `dot sync`
 - **Full version history**: Roll back any file with `dot git log`
 - **No new mental model**: It's git. If you know git, you know everything
 - **Works without GitHub**: Local-only mode until you're ready to push
@@ -40,40 +40,35 @@ pipx install git+https://github.com/krisrowe/dotfiles-manager.git
 
 This gives you two commands: `dot` (CLI) and `dot-mcp` (MCP server).
 
-## Quick Start
+## User Journeys
 
-### 1. Track your config files
+### First machine: start tracking dotfiles
 
 ```bash
 dot track ~/.bashrc
 dot track ~/.claude/CLAUDE.md
 dot track ~/.config/myapp/
+dot remote setup --repo-name my-dotfiles
+dot sync
 ```
 
 Each `dot track` commits immediately to a local bare repo at `~/.dotfiles`.
+`dot remote setup` creates a **private** GitHub repo and sets a
+`dotfiles-default` topic for discovery on other machines. `dot sync` pushes.
 
-### 2. (Optional) Set up GitHub backup
-
-```bash
-dot remote setup
-```
-
-Creates a **private** repo on GitHub (default name: `personal-dotfiles`)
-using the `gh` CLI. Sets a `dotfiles-default` topic on the repo for
-discovery on other machines.
-
-`dot remote setup` is idempotent — run it again and it verifies the
-existing configuration. It also validates that the topic is not duplicated
-across multiple repos to ensure `dot restore` can unambiguously find the
-right one.
-
-Use `--repo-name` to choose a different GitHub repo name:
+### New machine: set up from existing GitHub repo
 
 ```bash
+pipx install git+https://github.com/krisrowe/dotfiles-manager.git
 dot remote setup --repo-name my-dotfiles
+dot sync
 ```
 
-### 3. Sync
+`remote setup` finds the existing repo by name, verifies it's private,
+and sets it as the remote. `sync` pulls everything down and checks out
+tracked files to their original paths.
+
+### Day-to-day: back up changes
 
 ```bash
 dot sync
@@ -82,16 +77,32 @@ dot sync
 Commits any changes, pulls from GitHub, pushes to GitHub. One command does
 everything.
 
-## Restore on a New Machine
+### Multiple stores: separate repos for different purposes
 
 ```bash
-pipx install git+https://github.com/krisrowe/dotfiles-manager.git
-dot restore git@github.com:YOUR_USERNAME/my-dotfiles.git
+# Create a second store
+dot stores create work
+
+# Track files, set up remote, sync — all scoped to the store
+dot --store=work track ~/.config/work-app/settings.conf
+dot --store=work remote setup --repo-name my-work-dotfiles
+dot --store=work sync
 ```
 
-All tracked files are checked out to their original paths. If files already
-exist at those paths, `dot restore` reports the conflicts and tells you how
-to resolve them.
+### New machine with multiple stores
+
+```bash
+# Set up each store by name — topics let setup find the right repo
+dot remote setup --repo-name my-dotfiles
+dot --store=work remote setup --repo-name my-work-dotfiles
+dot sync
+dot --store=work sync
+```
+
+`dot remote setup` is idempotent — it creates the repo if it doesn't
+exist, or attaches to it if it does. It validates that the
+`dotfiles-<store-name>` topic is not duplicated across repos so there's
+never ambiguity.
 
 ## Commands
 
@@ -131,6 +142,13 @@ Your global git hooks run on dotfile commits by default. If they interfere:
 | `dot hooks disable` | Disable hooks on dotfiles repo (persistent) |
 | `dot hooks reset` | Restore global hooks |
 | `dot hooks show` | Show current hooks state |
+
+### Stores
+
+| Command | Description |
+|---------|-------------|
+| `dot stores create <name>` | Create a new store at `~/.dotfiles-<name>` |
+| `dot stores list` | Show all registered stores |
 
 ### Pass-through git
 
@@ -173,46 +191,6 @@ Reasons to use multiple stores:
 
 `--store` is a top-level option that applies to every command. When omitted,
 the default store is used — no behavior change from single-store usage.
-
-```bash
-# Create a second store
-dot stores create work
-
-# All commands work with --store
-dot --store=work track ~/.config/work-app/settings.conf
-dot --store=work remote setup --repo-name my-work-dotfiles
-dot --store=work sync
-dot --store=work hooks disable
-dot --store=work list
-dot --store=work git log
-```
-
-### Store management
-
-| Command | Description |
-|---------|-------------|
-| `dot stores create <name>` | Create a new store at `~/.dotfiles-<name>` |
-| `dot stores list` | Show all registered stores |
-
-### Restoring multiple stores
-
-```bash
-# Restore default store by URL
-dot restore git@github.com:YOUR_USERNAME/my-dotfiles.git
-
-# Restore a named store by URL
-dot --store=work restore git@github.com:YOUR_USERNAME/my-work-dotfiles.git
-
-# Restore a named store by topic (finds dotfiles-work on GitHub)
-dot --store=work restore
-
-# Discover and restore all stores at once
-dot restore --discover
-```
-
-`dot remote setup` sets a `dotfiles-<store-name>` topic on each GitHub
-repo. Topic-based restore uses these topics to find the right repo
-automatically.
 
 ## MCP Server
 
@@ -287,11 +265,7 @@ Export the entire repo (with full history) to a single file:
 dot git bundle create ~/dotfiles-backup.bundle --all
 ```
 
-Put that file on Google Drive, a USB stick, wherever. Restore from it:
-
-```bash
-dot restore ~/dotfiles-backup.bundle
-```
+Put that file on Google Drive, a USB stick, wherever.
 
 ## Environment Variables
 

@@ -3,8 +3,8 @@
 Manages the gitignore-format exclude file at ~/.config/dotgit/exclude.
 """
 
-from .config import get_exclude_file
 from . import repo
+from .repo import get_exclude_file
 
 
 def add(pattern: str) -> dict:

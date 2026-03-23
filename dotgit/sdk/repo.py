@@ -7,7 +7,7 @@ should call git directly.
 import subprocess
 from pathlib import Path
 
-from .config import get_repo_dir, get_work_tree, get_exclude_file
+from .config import get_repo_dir, get_work_tree
 
 
 class DotGitError(Exception):
@@ -67,11 +67,46 @@ def init() -> Path:
     # Ensure showUntrackedFiles is off
     _git("config", "status.showUntrackedFiles", "no")
 
-    # Ensure core.excludesFile points to our managed exclude file
-    exclude_file = get_exclude_file()
-    _git("config", "core.excludesFile", str(exclude_file))
+    # Ensure info/exclude exists (git's built-in exclude mechanism)
+    info_dir = repo_dir / "info"
+    info_dir.mkdir(exist_ok=True)
+    exclude_file = info_dir / "exclude"
+    if not exclude_file.exists():
+        exclude_file.write_text(
+            "# dotgit exclude file (gitignore format)\n"
+            "# Managed by 'dot exclude' commands\n"
+        )
+
+    # Migrate old exclude file from config dir if present
+    _migrate_exclude_file(exclude_file)
+
+    # Remove stale core.excludesFile config if set
+    _git("config", "--unset", "core.excludesFile", check=False)
 
     return repo_dir
+
+
+def get_exclude_file() -> Path:
+    """Get the path to the exclude file (inside the bare repo)."""
+    return get_repo_dir() / "info" / "exclude"
+
+
+def _migrate_exclude_file(new_exclude: Path) -> None:
+    """Migrate exclude file from old config dir location if present."""
+    from .config import get_config_dir
+    old_exclude = get_config_dir() / "exclude"
+    if not old_exclude.exists():
+        return
+    # Only migrate if the old file has user content beyond the header
+    old_content = old_exclude.read_text()
+    has_user_content = any(
+        line.strip() and not line.strip().startswith("#")
+        for line in old_content.splitlines()
+    )
+    if has_user_content:
+        # Append old patterns to new file
+        new_exclude.write_text(new_exclude.read_text() + old_content)
+    old_exclude.unlink()
 
 
 def _require_repo():

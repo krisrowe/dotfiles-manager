@@ -8,14 +8,17 @@ import sys
 
 import click
 
-from ..sdk import sync, exclude, remote, repo
+from ..sdk import sync, exclude, remote, repo, stores
+from ..sdk.config import set_current_store
 
 
 @click.group()
 @click.version_option(version="0.1.0")
-def main():
+@click.option("--store", "store_name", default=None,
+              help="Target a named store instead of the default.")
+def main(store_name):
     """Dotfile management backed by a bare git repo."""
-    pass
+    set_current_store(store_name)
 
 
 # =========================================================================
@@ -101,17 +104,6 @@ def sync_cmd(no_hooks: bool):
     for action in result["actions"]:
         click.echo(f"  {action}")
 
-
-@main.command()
-@click.argument("repo_url")
-def restore(repo_url: str):
-    """Clone dotfiles from GitHub and check out to home directory."""
-    result = sync.restore(repo_url)
-    if not result["success"]:
-        click.echo(result["error"], err=True)
-        sys.exit(1)
-    for action in result["actions"]:
-        click.echo(f"  {action}")
 
 
 # =========================================================================
@@ -313,6 +305,40 @@ def mcp_uninstall(target: str, scope: str):
             click.echo(f"Unregistered dotgit MCP server from {settings_path}")
         else:
             click.echo("dotgit MCP server not registered")
+
+
+# =========================================================================
+# Stores commands
+# =========================================================================
+
+
+@main.group("stores")
+def stores_group():
+    """Manage dotfile stores."""
+    pass
+
+
+@stores_group.command("create")
+@click.argument("name")
+def stores_create(name: str):
+    """Create a new store."""
+    try:
+        result = stores.create(name)
+    except stores.StoreError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+    if result.get("created"):
+        click.echo(f"Created store '{result['name']}' at {result['repo']}")
+    else:
+        click.echo(result.get("message", "Store already exists."))
+
+
+@stores_group.command("list")
+def stores_list():
+    """Show all registered stores."""
+    result = stores.list_stores()
+    for s in result["stores"]:
+        click.echo(f"  {s['name']:20s} {s['repo']}")
 
 
 # =========================================================================
