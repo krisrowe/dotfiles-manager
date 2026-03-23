@@ -264,38 +264,18 @@ def mcp_group():
 @mcp_group.command("install")
 @click.argument("target", type=click.Choice(["claude"]))
 @click.option("--scope", type=click.Choice(["user", "project"]), default="user",
-              help="user = ~/.claude/settings.json, project = .claude/settings.local.json")
+              help="user = user-level config, project = project-level config")
 def mcp_install(target: str, scope: str):
     """Register dot-mcp as an MCP server."""
-    import json
-    from pathlib import Path
+    import subprocess
 
     if target == "claude":
-        if scope == "user":
-            settings_path = Path.home() / ".claude" / "settings.json"
-        else:
-            settings_path = Path.cwd() / ".claude" / "settings.local.json"
-
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if settings_path.exists():
-            with open(settings_path) as f:
-                settings = json.load(f)
-        else:
-            settings = {}
-
-        if "mcpServers" not in settings:
-            settings["mcpServers"] = {}
-
-        settings["mcpServers"]["dotgit"] = {
-            "command": "dot-mcp",
-        }
-
-        with open(settings_path, "w") as f:
-            json.dump(settings, f, indent=2)
-            f.write("\n")
-
-        click.echo(f"Registered dotgit MCP server in {settings_path}")
+        cmd = ["claude", "mcp", "add", "-s", scope, "dotgit", "--", "dot-mcp"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            click.echo(f"Failed: {result.stderr.strip()}", err=True)
+            raise SystemExit(1)
+        click.echo(result.stdout.strip() or f"Registered dotgit MCP server ({scope} scope)")
 
 
 @mcp_group.command("uninstall")
@@ -303,30 +283,15 @@ def mcp_install(target: str, scope: str):
 @click.option("--scope", type=click.Choice(["user", "project"]), default="user")
 def mcp_uninstall(target: str, scope: str):
     """Unregister dot-mcp from an MCP server."""
-    import json
-    from pathlib import Path
+    import subprocess
 
     if target == "claude":
-        if scope == "user":
-            settings_path = Path.home() / ".claude" / "settings.json"
-        else:
-            settings_path = Path.cwd() / ".claude" / "settings.local.json"
-
-        if not settings_path.exists():
-            click.echo(f"Settings file not found: {settings_path}")
-            return
-
-        with open(settings_path) as f:
-            settings = json.load(f)
-
-        if "mcpServers" in settings and "dotgit" in settings["mcpServers"]:
-            del settings["mcpServers"]["dotgit"]
-            with open(settings_path, "w") as f:
-                json.dump(settings, f, indent=2)
-                f.write("\n")
-            click.echo(f"Unregistered dotgit MCP server from {settings_path}")
-        else:
-            click.echo("dotgit MCP server not registered")
+        cmd = ["claude", "mcp", "remove", "-s", scope, "dotgit"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            click.echo(f"Failed: {result.stderr.strip()}", err=True)
+            raise SystemExit(1)
+        click.echo(result.stdout.strip() or f"Unregistered dotgit MCP server ({scope} scope)")
 
 
 # =========================================================================
