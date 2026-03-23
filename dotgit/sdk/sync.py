@@ -139,6 +139,86 @@ def sync(skip_hooks: bool = False) -> dict:
     return {"success": True, "actions": actions}
 
 
+def export_bundle(path: str) -> dict:
+    """Export the store as a git bundle file.
+
+    Args:
+        path: Directory (auto-names the file) or explicit file path.
+    """
+    if not repo.is_initialized():
+        return {"success": False, "error": "Repo not initialized."}
+
+    dest = Path(path).expanduser().resolve()
+
+    if dest.is_dir():
+        from .config import get_current_store
+        store = get_current_store()
+        if store and store != "default":
+            filename = f"dotfiles-{store}.bundle"
+        else:
+            filename = "dotfiles.bundle"
+        dest = dest / filename
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    result = repo.git_passthrough(["bundle", "create", str(dest), "--all"])
+    if result.returncode != 0:
+        return {
+            "success": False,
+            "error": result.stderr.strip() or "Bundle creation failed.",
+        }
+
+    return {
+        "success": True,
+        "path": str(dest),
+    }
+
+
+def import_bundle(path: str) -> dict:
+    """Import a git bundle into the current store.
+
+    Clones the bundle as the bare repo if not initialized,
+    or fetches from it if already initialized.
+    """
+    bundle = Path(path).expanduser().resolve()
+
+    if not bundle.exists():
+        return {"success": False, "error": f"Bundle not found: {bundle}"}
+
+    repo_dir = get_repo_dir()
+
+    if repo.is_initialized():
+        # Fetch from bundle into existing repo
+        result = repo.git_passthrough(["fetch", str(bundle)])
+        if result.returncode != 0:
+            return {"success": False, "error": result.stderr.strip() or "Fetch from bundle failed."}
+
+        # Merge fetched refs
+        result = repo.git_passthrough(["merge", "FETCH_HEAD", "--ff-only"])
+        if result.returncode != 0:
+            return {"success": False, "error": "Merge failed. Resolve manually with: dot git merge FETCH_HEAD"}
+
+        return {"success": True, "actions": ["Fetched and merged from bundle"]}
+
+    # Clone bare from bundle
+    import subprocess as sp
+    result = sp.run(
+        ["git", "clone", "--bare", str(bundle), str(repo_dir)],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return {"success": False, "error": result.stderr.strip() or "Clone from bundle failed."}
+
+    repo.init()
+
+    # Checkout files
+    checkout = repo.git_passthrough(["checkout"])
+    if checkout.returncode == 0:
+        return {"success": True, "actions": ["Imported and checked out all files"]}
+
+    return {"success": True, "actions": ["Imported bundle (checkout may need manual resolution)"]}
+
+
 def _auto_commit_message(changes: list[dict]) -> str:
     """Generate a commit message from changed files."""
     if len(changes) == 1:

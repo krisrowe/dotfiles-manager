@@ -179,6 +179,41 @@ async def dot_sync(
     return sync.sync(skip_hooks=skip_hooks)
 
 
+@mcp.tool(
+    name="dot_export",
+    description="""Export the store as a git bundle file.
+
+Creates a portable archive of the entire store (with full history)
+as a single file. Use this to back up stores to cloud drives or
+transfer between machines without a git remote.
+
+If path is a directory, the bundle is auto-named (e.g.,
+dotfiles-sensitive.bundle). If path is a file, it's used as-is.""",
+)
+async def dot_export(
+    path: str = Field(description="Directory (auto-names the file) or explicit file path"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
+    return sync.export_bundle(path)
+
+
+@mcp.tool(
+    name="dot_import",
+    description="""Import a git bundle into the current store.
+
+Restores a store from a previously exported bundle file. If the
+store is not initialized, clones from the bundle. If already
+initialized, fetches and merges from the bundle.""",
+)
+async def dot_import(
+    path: str = Field(description="Path to the bundle file"),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+) -> dict:
+    _set_store(store)
+    return sync.import_bundle(path)
+
+
 # =========================================================================
 # Exclude tools
 # =========================================================================

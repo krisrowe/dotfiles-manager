@@ -105,6 +105,28 @@ def sync_cmd(no_hooks: bool):
         click.echo(f"  {action}")
 
 
+@main.command("export")
+@click.argument("path")
+def export_cmd(path: str):
+    """Export the store as a git bundle file."""
+    result = sync.export_bundle(path)
+    if not result["success"]:
+        click.echo(result["error"], err=True)
+        sys.exit(1)
+    click.echo(f"Exported to {result['path']}")
+
+
+@main.command("import")
+@click.argument("path")
+def import_cmd(path: str):
+    """Import a git bundle into the current store."""
+    result = sync.import_bundle(path)
+    if not result["success"]:
+        click.echo(result["error"], err=True)
+        sys.exit(1)
+    for action in result["actions"]:
+        click.echo(f"  {action}")
+
 
 # =========================================================================
 # Exclude commands
