@@ -251,7 +251,7 @@ def remote_show():
 def remote_available():
     """List remote dotfiles repositories discovered by GitHub topics."""
     try:
-        results = remote.discover_remotes()
+        results = remote.discover_remote_stores()
         if not results:
             click.echo("No remote dotfiles repositories discovered.")
             return

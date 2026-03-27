@@ -363,7 +363,7 @@ of repository names and their associated store names.""",
 )
 async def dot_remote_available() -> dict:
     try:
-        results = remote.discover_remotes()
+        results = remote.discover_remote_stores()
         return {"success": True, "available_stores": results}
     except Exception as e:
         return {"success": False, "error": str(e)}
