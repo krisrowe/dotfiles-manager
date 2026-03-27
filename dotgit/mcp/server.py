@@ -9,14 +9,14 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ..sdk import sync, exclude, remote, repo, stores, ignore
-from ..sdk.config import set_current_store
+from ..sdk.config import set_invocation_store
 
 mcp = FastMCP("dotgit")
 
 
 def _set_store(store: Optional[str]) -> None:
     """Set the active store for this invocation."""
-    set_current_store(store)
+    set_invocation_store(store)
 
 
 # =========================================================================
