@@ -31,7 +31,6 @@ def discover_remote_stores() -> list[dict]:
         raise Exception("Not authenticated with gh. Run: gh auth login")
 
     # Search for any repo with a topic starting with 'dotfiles-'
-    # We query for nameWithOwner and topics.
     result = subprocess.run(
         ["gh", "repo", "list", user, "--json", "nameWithOwner,repositoryTopics", "--limit", "100"],
         capture_output=True, text=True, check=False,
@@ -43,8 +42,10 @@ def discover_remote_stores() -> list[dict]:
     discovered = []
     
     for r in all_repos:
-        topics = r.get("repositoryTopics", [])
-        for t in topics:
+        # repositoryTopics can be null or a list of {"name": "topic"}
+        topics_raw = r.get("repositoryTopics") or []
+        for t_obj in topics_raw:
+            t = t_obj.get("name", "")
             if t.startswith("dotfiles-"):
                 store_name = t.replace("dotfiles-", "")
                 discovered.append({
