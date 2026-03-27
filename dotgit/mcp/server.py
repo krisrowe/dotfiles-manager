@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ..sdk import sync, exclude, remote, repo, stores, ignore
-from ..sdk.config import set_invocation_store
+from ..sdk.config import set_invocation_store, get_active_store
 
 mcp = FastMCP("dotgit")
 
@@ -173,10 +173,34 @@ async def dot_sync(
         default=False,
         description="Skip git hooks for this invocation only. Use only when the user explicitly requests it.",
     ),
-    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+    store: Optional[str] = Field(default=None, description="Target a named store instead of the active one."),
 ) -> dict:
     _set_store(store)
     return sync.sync(skip_hooks=skip_hooks)
+
+
+@mcp.tool(
+    name="dot_default",
+    description="""View or set the persistently active dotfile store for this machine.
+
+Analogous to 'gcloud config set project'. Safe commands (sync, status, list) 
+will use this store implicitly if no store flag is provided.
+
+To set the active store: call with the 'name' parameter.
+To view current active store: call with no parameters.""",
+)
+async def dot_default(
+    name: Optional[str] = Field(default=None, description="Name of the store to set as active."),
+) -> dict:
+    if name:
+        try:
+            stores.set_active_store_name(name)
+            return {"success": True, "active_store": name}
+        except stores.StoreError as e:
+            return {"success": False, "error": str(e)}
+    else:
+        active = get_active_store()
+        return {"active_store": active or "default"}
 
 
 @mcp.tool(
@@ -324,10 +348,25 @@ for dot_restore on another machine.
 If configured=false, the user needs to run dot_remote_setup first.""",
 )
 async def dot_remote_show(
-    store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+    store: Optional[str] = Field(default=None, description="Target a named store."),
 ) -> dict:
     _set_store(store)
     return remote.show()
+
+
+@mcp.tool(
+    name="dot_remote_available",
+    description="""Discover existing dotfiles repositories on the user's GitHub account.
+
+Uses GitHub topics (dotfiles-*) to identify valid stores. Returns a list
+of repository names and their associated store names.""",
+)
+async def dot_remote_available() -> dict:
+    try:
+        results = remote.discover_remotes()
+        return {"success": True, "available_stores": results}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # =========================================================================
