@@ -90,8 +90,8 @@ def list_files(output_format: str):
               default="text")
 def status(output_format: str):
     """Show modified tracked files."""
-    from ..sdk.config import get_current_store, get_active_store
-    active = get_current_store() or get_active_store() or "default"
+    from ..sdk.config import get_invocation_store, get_active_store
+    active = get_invocation_store() or get_active_store() or "default"
     
     result = sync.get_status()
     if not result["initialized"]:
