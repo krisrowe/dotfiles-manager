@@ -6,16 +6,17 @@ Orchestrates track/untrack/sync/restore workflows using repo primitives.
 import subprocess
 from pathlib import Path
 
-from .config import get_repo_dir, get_work_tree
+from .config import get_repo_dir, get_work_tree, require_explicit_store
 from . import repo
 
 
 def track(path: str) -> dict:
-    """Start tracking a file or directory.
+    """Start tracking a file or directory. REQUIRES explicit store.
 
     Initializes repo if needed. Commits immediately.
     Returns dict with tracked path info.
     """
+    require_explicit_store("track")
     repo.init()
 
     abs_path = Path(path).expanduser().resolve()
@@ -49,10 +50,11 @@ def track(path: str) -> dict:
 
 
 def untrack(path: str) -> dict:
-    """Stop tracking a file or directory. Keeps local file.
+    """Stop tracking a file or directory. Keeps local file. REQUIRES explicit store.
 
     Returns dict with result.
     """
+    require_explicit_store("untrack")
     abs_path = Path(path).expanduser().resolve()
     work_tree = get_work_tree()
 
@@ -78,10 +80,11 @@ def untrack(path: str) -> dict:
 
 
 def get_status() -> dict:
-    """Get status of tracked files.
+    """Get status of tracked files. Safe (uses active).
 
     Returns dict with changed files list.
     """
+    require_explicit_store("status")
     if not repo.is_initialized():
         return {"initialized": False, "changes": []}
     changes = repo.status()
@@ -89,10 +92,11 @@ def get_status() -> dict:
 
 
 def get_list() -> dict:
-    """List all tracked files.
+    """List all tracked files. Safe (uses active).
 
     Returns dict with file list.
     """
+    require_explicit_store("list")
     if not repo.is_initialized():
         return {"initialized": False, "files": []}
     files = repo.list_tracked()
@@ -100,16 +104,15 @@ def get_list() -> dict:
 
 
 def sync(skip_hooks: bool = False) -> dict:
-    """Self-healing sync: commit local changes, pull, push.
+    """Self-healing sync: commit local changes, pull, push. Safe (uses active).
 
-    1. Init repo if needed
-    2. Ensure exclude file tracked
-    3. Stage + commit any dirty tracked files
-    4. Pull --rebase from origin
-    5. Push to origin
+    1. Stage + commit any dirty tracked files
+    2. Pull --rebase from origin
+    3. Push to origin
 
     Returns dict describing what happened.
     """
+    require_explicit_store("sync")
     repo.init()
 
     actions = []
@@ -140,28 +143,26 @@ def sync(skip_hooks: bool = False) -> dict:
 
 
 def export_bundle(path: str) -> dict:
-    """Export the store as a git bundle file.
+    """Export the store as a git bundle file. Safe (uses active).
 
     Args:
         path: Directory (auto-names the file) or explicit file path.
     """
+    require_explicit_store("export")
     if not repo.is_initialized():
         return {"success": False, "error": "Repo not initialized."}
 
     dest = Path(path).expanduser().resolve()
 
     if dest.is_dir():
-        from .config import get_current_store
-        store = get_current_store()
-        if store and store != "default":
-            filename = f"dotfiles-{store}.bundle"
-        else:
-            filename = "dotfiles.bundle"
+        from .config import get_invocation_store, get_active_store
+        store = get_invocation_store() or get_active_store() or "default"
+        filename = f"dotfiles-{store}.bundle"
         dest = dest / filename
 
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    result = repo.git_passthrough(["bundle", "create", str(dest), "--all"])
+    result = repo.git_passthrough(["bundle", "create", str(dest), "--all"], skip_safety=True)
     if result.returncode != 0:
         return {
             "success": False,
@@ -175,11 +176,12 @@ def export_bundle(path: str) -> dict:
 
 
 def import_bundle(path: str) -> dict:
-    """Import a git bundle into the current store.
+    """Import a git bundle into the current store. REQUIRES explicit store.
 
     Clones the bundle as the bare repo if not initialized,
     or fetches from it if already initialized.
     """
+    require_explicit_store("import")
     bundle = Path(path).expanduser().resolve()
 
     if not bundle.exists():
@@ -189,12 +191,12 @@ def import_bundle(path: str) -> dict:
 
     if repo.is_initialized():
         # Fetch from bundle into existing repo
-        result = repo.git_passthrough(["fetch", str(bundle)])
+        result = repo.git_passthrough(["fetch", str(bundle)], skip_safety=True)
         if result.returncode != 0:
             return {"success": False, "error": result.stderr.strip() or "Fetch from bundle failed."}
 
         # Merge fetched refs
-        result = repo.git_passthrough(["merge", "FETCH_HEAD", "--ff-only"])
+        result = repo.git_passthrough(["merge", "FETCH_HEAD", "--ff-only"], skip_safety=True)
         if result.returncode != 0:
             return {"success": False, "error": "Merge failed. Resolve manually with: dot git merge FETCH_HEAD"}
 
@@ -212,7 +214,7 @@ def import_bundle(path: str) -> dict:
     repo.init()
 
     # Checkout files
-    checkout = repo.git_passthrough(["checkout"])
+    checkout = repo.git_passthrough(["checkout"], skip_safety=True)
     if checkout.returncode == 0:
         return {"success": True, "actions": ["Imported and checked out all files"]}
 

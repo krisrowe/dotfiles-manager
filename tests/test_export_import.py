@@ -17,7 +17,7 @@ def test_export_to_directory(dotgit_env):
 
     result = sync.export_bundle(str(export_dir))
     assert result["success"]
-    assert result["path"].endswith("dotfiles.bundle")
+    assert result["path"].endswith("dotfiles-home.bundle")
     assert Path(result["path"]).exists()
 
 
@@ -50,7 +50,7 @@ def test_export_named_store(dotgit_env, monkeypatch):
     test_file.write_text("work config")
     sync.track(str(test_file))
 
-    config.set_current_store("work")
+    config.set_invocation_store("work")
 
     export_dir = home / "backups"
     export_dir.mkdir()
@@ -58,7 +58,7 @@ def test_export_named_store(dotgit_env, monkeypatch):
     assert result["success"]
     assert "dotfiles-work.bundle" in result["path"]
 
-    config.set_current_store(None)
+    config.set_invocation_store(None)
     monkeypatch.setenv("DOTGIT_REPO_DIR", str(dotgit_env["repo_dir"]))
 
 

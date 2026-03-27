@@ -15,6 +15,7 @@ keeps a versioned backup.
 - **No new mental model**: It's git. If you know git, you know everything
 - **Works without GitHub**: Local-only mode until you're ready to push
 - **Multiple stores**: Manage independent repos from one CLI with `--store`
+- **Safety First**: Dangerous commands require explicit store confirmation
 - **AI-agent friendly**: MCP server lets Claude or other assistants manage your dotfiles
 
 ## Architecture
@@ -45,27 +46,35 @@ This gives you two commands: `dot` (CLI) and `dot-mcp` (MCP server).
 ### First machine: start tracking dotfiles
 
 ```bash
-dot track ~/.bashrc
-dot track ~/.claude/CLAUDE.md
-dot track ~/.config/myapp/
+# Set the active store for the current machine
+dot default personal
+
+# Track files (requires explicit --store for safety)
+dot --store=personal track ~/.bashrc
+dot --store=personal track ~/.config/myapp/
+
+# Setup remote and sync (can use active store implicitly)
 dot remote setup --repo-name my-dotfiles
 dot sync
 ```
 
-Each `dot track` commits immediately to a local bare repo at `~/.dotfiles`.
+Each `dot track` commits immediately to a local bare repo (e.g. `~/.dotfiles-personal`).
 `dot remote setup` creates a **private** GitHub repo and sets a
-`dotfiles-default` topic for discovery on other machines. `dot sync` pushes.
+`dotfiles-personal` topic for discovery. `dot sync` pushes.
 
-### New machine: set up from existing GitHub repo
+### New machine: discover and set up existing stores
 
 ```bash
-pipx install git+https://github.com/krisrowe/dotfiles-manager.git
-dot remote setup --repo-name my-dotfiles
+# Discover available dotfiles on your GitHub account
+dot remote available
+
+# Setup a discovered store
+dot --store=personal remote setup --repo-name my-dotfiles
+dot default personal
 dot sync
 ```
 
-`remote setup` finds the existing repo by name, verifies it's private,
-and sets it as the remote. `sync` pulls everything down and checks out
+`remote setup` attaches to the existing repo. `sync` pulls everything down and checks out
 tracked files to their original paths.
 
 ### Day-to-day: back up changes
@@ -74,8 +83,7 @@ tracked files to their original paths.
 dot sync
 ```
 
-Commits any changes, pulls from GitHub, pushes to GitHub. One command does
-everything.
+Commits any changes, pulls from GitHub, pushes to GitHub. Uses the **active store** configured for the current machine.
 
 ### Multiple stores: separate repos for different purposes
 
@@ -83,26 +91,16 @@ everything.
 # Create a second store
 dot stores create work
 
-# Track files, set up remote, sync — all scoped to the store
+# Track files scoped to the store (REQUIRED flag)
 dot --store=work track ~/.config/work-app/settings.conf
-dot --store=work remote setup --repo-name my-work-dotfiles
+
+# Sync specifically for the work store
 dot --store=work sync
-```
 
-### New machine with multiple stores
-
-```bash
-# Set up each store by name — topics let setup find the right repo
-dot remote setup --repo-name my-dotfiles
-dot --store=work remote setup --repo-name my-work-dotfiles
+# Or switch your active store and sync normally
+dot default work
 dot sync
-dot --store=work sync
 ```
-
-`dot remote setup` is idempotent — it creates the repo if it doesn't
-exist, or attaches to it if it does. It validates that the
-`dotfiles-<store-name>` topic is not duplicated across repos so there's
-never ambiguity.
 
 ## Commands
 
@@ -110,11 +108,12 @@ never ambiguity.
 
 | Command | Description |
 |---------|-------------|
-| `dot track <path>` | Start tracking a file or directory |
-| `dot untrack <path>` | Stop tracking (keeps local file) |
-| `dot list` | Show all tracked files |
-| `dot status` | Show modified tracked files |
-| `dot sync` | Commit + pull + push |
+| `dot track <path>` | Start tracking (Requires `--store`) |
+| `dot untrack <path>` | Stop tracking (Requires `--store`) |
+| `dot list` | List all tracked files in active store |
+| `dot status` | Show modified files in active store |
+| `dot sync` | Commit + pull + push active store |
+| `dot default [NAME]` | View or set the machine's active store |
 
 ### Exclude patterns
 
@@ -131,7 +130,8 @@ Control what gets ignored inside tracked directories.
 | Command | Description |
 |---------|-------------|
 | `dot remote setup [--repo-name NAME]` | Create/verify private GitHub repo |
-| `dot remote show` | Show remote URL |
+| `dot remote show` | Show remote URL of active store |
+| `dot remote available` | Discover available stores on GitHub |
 
 ### Git hooks
 
@@ -139,7 +139,7 @@ Your global git hooks run on dotfile commits by default. If they interfere:
 
 | Command | Description |
 |---------|-------------|
-| `dot hooks disable` | Disable hooks on dotfiles repo (persistent) |
+| `dot hooks disable` | Disable hooks on current store (persistent) |
 | `dot hooks reset` | Restore global hooks |
 | `dot hooks show` | Show current hooks state |
 
@@ -148,19 +148,17 @@ Your global git hooks run on dotfile commits by default. If they interfere:
 | Command | Description |
 |---------|-------------|
 | `dot stores create <name>` | Create a new store at `~/.dotfiles-<name>` |
-| `dot stores list` | Show all registered stores |
+| `dot stores list` | Show all stores (* = active) |
 
 ### Pass-through git
 
 | Command | Description |
 |---------|-------------|
-| `dot git <args>` | Run any git command against the dotfiles repo |
+| `dot git <args>` | Run git commands (Requires `--store`) |
 
 ```bash
-dot git log --oneline -10       # Recent history
-dot git diff HEAD~1             # Last commit's changes
-dot git blame .bashrc           # Who changed what
-dot git bundle create backup.bundle --all  # Archive entire repo
+dot --store=work git log --oneline -10
+dot --store=personal git diff HEAD~1
 ```
 
 ## Multiple Stores
@@ -168,28 +166,11 @@ dot git bundle create backup.bundle --all  # Archive entire repo
 Manage independent bare repos from one CLI with `--store`. Each store gets
 its own tracking, hooks configuration, git remote, and backup strategy.
 
-Reasons to use multiple stores:
-
-- **Sensitivity levels.** Different pre-commit hooks (or no hooks) and
-  different backup targets for different classes of data.
-- **Personas.** Work config vs. personal config, or any other role-based
-  separation.
-- **Backup targets.** GitHub, a self-hosted git server, a cloud drive
-  bundle, or anywhere else — each store can back up independently.
-- **Auditability.** Each store is independently listable
-  (`dot --store=<name> list`), making it easy to review and reclassify.
-
-See [Store Patterns](docs/store-patterns.md) for an example multi-store
-setup separating config, personal data, and secrets.
-
-`--store` is a top-level option that applies to every command. When omitted,
-the default store is used — no behavior change from single-store usage.
+`--store` is a top-level option. When omitted, the **active store** configured via `dot default` is used for safe commands (sync, status), while risky commands (track, git) will require an explicit flag to prevent accidental cross-contamination.
 
 ## MCP Server
 
-The MCP server exposes the same SDK functions as the CLI, so AI agents
-have the same capabilities. All MCP tools accept an optional `store`
-parameter, matching the CLI `--store` option.
+The MCP server exposes the same SDK functions as the CLI. All MCP tools accept an optional `store` parameter.
 
 ### Register with Claude Code
 
@@ -197,79 +178,12 @@ parameter, matching the CLI `--store` option.
 dot mcp install claude
 ```
 
-Or register for the current project only:
-
-```bash
-dot mcp install claude --scope=project
-```
-
-Or manually add to your Claude settings:
-
-```json
-{
-  "mcpServers": {
-    "dotgit": {
-      "command": "dot-mcp"
-    }
-  }
-}
-```
-
-| Command | Description |
-|---------|-------------|
-| `dot mcp install claude` | Register with Claude Code |
-| `dot mcp install claude --scope=project` | Register for current project only |
-| `dot mcp uninstall claude` | Unregister from Claude Code |
-
 ## How It Works
 
-A bare git repo lives at `~/.dotfiles`. Your home directory is the work
-tree. `showUntrackedFiles = no` means git only sees files you explicitly
-`dot track`.
-
-```
-~/.dotfiles/    ← bare git database (no working tree of its own)
-~/              ← work tree (your actual home directory)
-```
+Each store is a bare git repo (e.g. `~/.dotfiles-work`). Your home directory is the work tree. `showUntrackedFiles = no` means git only sees files you explicitly track.
 
 Every `dot` command translates to
-`git --git-dir=~/.dotfiles --work-tree=~ <command>`.
-
-With multiple stores, each store is a separate bare repo
-(`~/.dotfiles-<name>`) sharing the same `$HOME` work tree.
-
-## Local-Only Mode
-
-Don't want GitHub? Just skip `dot remote setup`. Everything works locally:
-
-```bash
-dot track ~/.bashrc
-dot sync                # Commits locally, reports "no remote"
-dot git log             # Full local history
-```
-
-Add GitHub later with `dot remote setup` — all history is preserved.
-
-## Archiving
-
-Export the entire repo (with full history) to a single file:
-
-```bash
-dot git bundle create ~/dotfiles-backup.bundle --all
-```
-
-Put that file on Google Drive, a USB stick, wherever.
-
-## Development
-
-```bash
-git clone https://github.com/krisrowe/dotfiles-manager.git
-cd dotfiles-manager
-pip install -e ".[dev]"
-pytest
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and testing details.
+`git --git-dir=~/.dotfiles-<store> --work-tree=~ <command>`.
 
 ## License
 

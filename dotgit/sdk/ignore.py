@@ -51,7 +51,7 @@ def init() -> dict:
     """Ensure global gitignore exists with standard patterns.
 
     Idempotent — adds missing standard patterns, skips existing ones.
-    Also tracks the ignore file in the default store.
+    Also tracks the ignore file in the active store.
     """
     existing = _read_lines()
     added = []
@@ -67,17 +67,19 @@ def init() -> dict:
         raw += "\n".join(added) + "\n"
         _write(raw)
 
-    # Track in default store (always default, regardless of --store)
+    # Track in the active store
     from . import sync
-    from .config import get_current_store, set_current_store
+    from .config import get_invocation_store, set_invocation_store, get_active_store
     ignore_path = _ignore_file()
     if ignore_path.exists():
-        prev_store = get_current_store()
-        set_current_store(None)
-        try:
-            sync.track(str(ignore_path))
-        finally:
-            set_current_store(prev_store)
+        active = get_active_store()
+        if active:
+            prev_store = get_invocation_store()
+            set_invocation_store(active)
+            try:
+                sync.track(str(ignore_path))
+            finally:
+                set_invocation_store(prev_store)
 
     # Add patterns to each store's info/exclude
     _sync_to_stores()
@@ -140,12 +142,13 @@ def _add_to_stores(pattern: str) -> None:
     """Add a pattern to every store's info/exclude."""
     from . import stores as stores_mod
     from .repo import get_exclude_file
-    from .config import get_repo_dir
-    import os
-
-    # Default store
-    exclude = get_exclude_file()
-    _add_to_exclude(exclude, pattern)
+    
+    # Default/Active store
+    try:
+        exclude = get_exclude_file()
+        _add_to_exclude(exclude, pattern)
+    except:
+        pass
 
     # Named stores
     data = stores_mod._read_stores()

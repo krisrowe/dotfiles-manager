@@ -9,16 +9,25 @@ import sys
 import click
 
 from ..sdk import sync, exclude, remote, repo, stores, ignore
-from ..sdk.config import set_current_store
+from ..sdk.config import set_invocation_store, get_active_store, set_active_store
 
 
 @click.group()
 @click.version_option(version="0.1.0")
 @click.option("--store", "store_name", default=None,
-              help="Target a named store instead of the default.")
+              help="Target a named store instead of the active one.")
 def main(store_name):
     """Dotfile management backed by a bare git repo."""
-    set_current_store(store_name)
+    set_invocation_store(store_name)
+
+
+def _require_explicit_store(ctx, command_name: str):
+    """Enforce --store requirement for risky commands."""
+    from ..sdk.config import get_invocation_store
+    if not get_invocation_store():
+        click.echo(f"Error: '{command_name}' is a risky command and requires an explicit --store flag.", err=True)
+        click.echo(f"Example: dot --store=work {command_name} <args>", err=True)
+        ctx.exit(1)
 
 
 # =========================================================================
@@ -28,8 +37,10 @@ def main(store_name):
 
 @main.command()
 @click.argument("path")
-def track(path: str):
-    """Start tracking a file or directory."""
+@click.pass_context
+def track(ctx, path: str):
+    """Start tracking a file or directory. REQUIRES --store."""
+    _require_explicit_store(ctx, "track")
     try:
         result = sync.track(path)
     except repo.DotGitError as e:
@@ -43,8 +54,10 @@ def track(path: str):
 
 @main.command()
 @click.argument("path")
-def untrack(path: str):
-    """Stop tracking a file or directory (keeps local file)."""
+@click.pass_context
+def untrack(ctx, path: str):
+    """Stop tracking a file or directory. REQUIRES --store."""
+    _require_explicit_store(ctx, "untrack")
     result = sync.untrack(path)
     if not result["success"]:
         click.echo(result["error"], err=True)
@@ -77,13 +90,17 @@ def list_files(output_format: str):
               default="text")
 def status(output_format: str):
     """Show modified tracked files."""
+    from ..sdk.config import get_current_store, get_active_store
+    active = get_current_store() or get_active_store() or "default"
+    
     result = sync.get_status()
     if not result["initialized"]:
-        click.echo("Not initialized. Run 'dot track <path>' to start.", err=True)
+        click.echo(f"Store '{active}' not initialized. Run 'dot track <path>' to start.", err=True)
         sys.exit(1)
     if output_format == "json":
         click.echo(json.dumps(result, indent=2))
     else:
+        click.echo(f"Store: {active}")
         if not result["changes"]:
             click.echo("Clean — nothing to sync.")
         else:
@@ -126,6 +143,30 @@ def import_cmd(path: str):
         sys.exit(1)
     for action in result["actions"]:
         click.echo(f"  {action}")
+
+
+# =========================================================================
+# Default / Alias command
+# =========================================================================
+
+
+@main.command("default")
+@click.argument("name", required=False)
+def default_alias(name: str | None):
+    """View or set the active store. Alias for 'dot stores set-default'."""
+    if name:
+        try:
+            set_active_store(name)
+            click.echo(f"Active store set to: {name}")
+        except stores.StoreError as e:
+            click.echo(str(e), err=True)
+            sys.exit(1)
+    else:
+        active = get_active_store()
+        if active:
+            click.echo(active)
+        else:
+            click.echo("default")
 
 
 # =========================================================================
@@ -204,6 +245,24 @@ def remote_show():
         click.echo(result["error"], err=True)
         sys.exit(1)
     click.echo(result["url"])
+
+
+@remote_group.command("available")
+def remote_available():
+    """List remote dotfiles repositories discovered by GitHub topics."""
+    try:
+        results = remote.discover_remotes()
+        if not results:
+            click.echo("No remote dotfiles repositories discovered.")
+            return
+        
+        click.echo(f"{'Repository':40s} {'Store/Topic'}")
+        click.echo("-" * 60)
+        for r in results:
+            click.echo(f"{r['repo']:40s} {r['store']}")
+    except Exception as e:
+        click.echo(f"Error discovering remotes: {str(e)}", err=True)
+        sys.exit(1)
 
 
 # =========================================================================
@@ -372,16 +431,31 @@ def stores_create(name: str):
         sys.exit(1)
     if result.get("created"):
         click.echo(f"Created store '{result['name']}' at {result['repo']}")
+        if result.get("name") == get_active_store():
+            click.echo(f"Automatically set '{result['name']}' as the active store.")
     else:
         click.echo(result.get("message", "Store already exists."))
 
 
+@stores_group.command("set-default")
+@click.argument("name")
+def stores_set_default(name: str):
+    """Set the active store for commands used without --store."""
+    try:
+        set_active_store(name)
+        click.echo(f"Active store set to: {name}")
+    except stores.StoreError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+
 @stores_group.command("list")
 def stores_list():
-    """Show all registered stores."""
+    """Show all registered stores. Active store is marked with *."""
     result = stores.list_stores()
     for s in result["stores"]:
-        click.echo(f"  {s['name']:20s} {s['repo']}")
+        marker = "*" if s.get("active") else " "
+        click.echo(f"{marker} {s['name']:20s} {s['repo']}")
 
 
 # =========================================================================
@@ -393,7 +467,8 @@ def stores_list():
                                         "allow_extra_args": True})
 @click.pass_context
 def git_passthrough(ctx):
-    """Run a git command against the dotfiles repo."""
+    """Run a git command against the dotfiles repo. REQUIRES --store."""
+    _require_explicit_store(ctx, "git")
     try:
         result = repo.git_passthrough(ctx.args)
     except repo.DotGitError as e:

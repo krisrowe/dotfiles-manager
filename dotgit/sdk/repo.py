@@ -7,7 +7,7 @@ should call git directly.
 import subprocess
 from pathlib import Path
 
-from .config import get_repo_dir, get_work_tree
+from .config import get_repo_dir, get_work_tree, require_explicit_store
 
 
 class DotGitError(Exception):
@@ -328,7 +328,15 @@ def has_unpushed() -> bool:
     return bool(result.stdout.strip())
 
 
-def git_passthrough(args: list[str]) -> subprocess.CompletedProcess:
-    """Run an arbitrary git command against the bare repo."""
+def git_passthrough(args: list[str], skip_safety: bool = False) -> subprocess.CompletedProcess:
+    """Run an arbitrary git command against the bare repo.
+    
+    Args:
+        skip_safety: If True, bypass the explicit store requirement check.
+            Used internally by other SDK functions that have already validated
+            the store.
+    """
+    if not skip_safety:
+        require_explicit_store("git")
     _require_repo()
     return _git(*args, check=False)

@@ -8,6 +8,7 @@ Hooks are disabled via the SDK to prevent global hooks from interfering.
 import os
 import subprocess
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -17,15 +18,13 @@ def dotgit_env(tmp_path, monkeypatch):
     """Set up an isolated dotgit environment.
 
     Provides:
-        - tmp bare repo at tmp_path/repo
+        - tmp bare repo for store 'home'
         - tmp work tree at tmp_path/home
         - tmp config dir at tmp_path/config
-        - tmp backup dir at tmp_path/backup
         - hooks disabled on the bare repo
 
     Returns a dict with the paths.
     """
-    repo_dir = tmp_path / "repo"
     home_dir = tmp_path / "home"
     # Config dir must be under work tree so git can track it
     config_dir = home_dir / ".config" / "dotgit"
@@ -33,7 +32,8 @@ def dotgit_env(tmp_path, monkeypatch):
     home_dir.mkdir()
     config_dir.mkdir(parents=True)
 
-    monkeypatch.setenv("DOTGIT_REPO_DIR", str(repo_dir))
+    # We do NOT set DOTGIT_REPO_DIR here because we want stores.py 
+    # to manage the path (~/.dotfiles-home).
     monkeypatch.setenv("DOTGIT_WORK_TREE", str(home_dir))
     monkeypatch.setenv("DOTGIT_CONFIG_DIR", str(config_dir))
 
@@ -47,14 +47,24 @@ def dotgit_env(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Test")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 
-    # Reset store state and initialize the bare repo
-    from dotgit.sdk import config, repo
-    config.set_current_store(None)
-    repo.init()
+    # Reset store state and initialize a named bare repo
+    from dotgit.sdk import config, repo, stores
+    
+    # Force reset of any internal module state
+    config.set_invocation_store(None)
+    
+    # We create a named store 'home' for tests.
+    # This initializes the bare repo and sets 'home' as active in stores.yaml.
+    stores.create("home")
+    
+    # Set the invocation context so risky commands (like track) work in tests.
+    config.set_invocation_store("home")
+    
+    # Disable hooks so they don't interfere with test commits
     repo.hooks_disable()
 
     return {
-        "repo_dir": repo_dir,
+        "repo_dir": Path(stores.get_store_repo_dir("home")),
         "home_dir": home_dir,
         "config_dir": config_dir,
     }
