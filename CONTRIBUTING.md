@@ -1,5 +1,66 @@
 # Contributing
 
+## Design Principles: Exclude / Ignore
+
+The exclude system controls what `dot status` shows — which untracked or
+modified paths surface as needing attention and which are silently ignored.
+This is critical because the work tree is `$HOME`, which contains thousands
+of files the user will never want to track.
+
+### Goals
+
+1. **Clean status output.** `dot status` should feel like `git status` in a
+   normal working directory — only actionable items, no noise. Users must be
+   able to suppress entire directory trees (e.g. `~/.cache/`, `~/.local/`)
+   so that genuinely untracked dotfiles are easy to spot.
+
+2. **Single CLI workflow.** All exclude management must be available through
+   `dot` CLI and MCP tools, with logic centralized in the SDK layer. Users
+   should not need to switch to a different tool or manually edit git
+   internals to manage exclusions.
+
+3. **Portable exclusions as a first-class concern.** Building a useful
+   exclude list is a real investment — it takes time to discover which
+   paths under `$HOME` are noise. The tool must treat that investment as
+   something worth preserving: make it easy to export, restore, and carry
+   to new machines without re-doing the work. CLI output, MCP tool
+   descriptions, documentation, and agent skills should actively surface
+   the portability of exclusions so users are aware of it and can act on
+   it. Preservation must be clean, low-friction, and secure — exclude
+   lists must not transit through dotfiles stores, public repos, or
+   any git remote not specifically designated for sensitive content,
+   since the patterns themselves can reveal what exists on a machine.
+
+4. **Multi-store awareness.** Multiple stores share `$HOME` as their work
+   tree. The exclude mechanism must account for this — patterns may apply
+   globally or per-store.
+
+### Constraints
+
+1. **No sensitive paths in tracked files.** Exclude patterns can reveal
+   what software, services, or configurations exist on a machine. An exclude
+   list committed to a public (or even private-but-shared) repo could leak
+   the presence of sensitive tooling, personal projects, or confidential
+   work. **Never commit exclude patterns to the dotfiles repo itself.**
+   Exclude files must live in git internals (`info/exclude`) or in
+   out-of-band configuration — not in tracked content.
+
+2. **Use git's native mechanisms.** Git provides `info/exclude` (per-repo,
+   untracked) and `core.excludesFile` / `~/.config/git/ignore` (global,
+   user-managed). The tool should build on these rather than inventing
+   parallel systems. This keeps behavior predictable for users who
+   understand git.
+
+3. **No cross-store side effects.** Adding an exclude pattern to one store
+   must not silently modify another store's configuration. If a pattern
+   should apply to all stores, that is the user's explicit choice, not an
+   automatic sync.
+
+4. **Transparency over magic.** Users should be able to see where patterns
+   are stored and what git mechanism is in effect. The tool reduces
+   cognitive load around git plumbing flags, not around understanding what
+   git is doing.
+
 ## Architecture
 
 ### SDK-First Design
@@ -61,7 +122,7 @@ Users can discover existing remote stores using `dot remote available`, which qu
 
 ## Testing
 
-Tests use the `dotgit_env` fixture for isolation. 
+Tests use the `dotgit_env` fixture for isolation.
 
 **Note for tests**: Because `track` and other risky commands now require an explicit store context, the `dotgit_env` fixture automatically sets the invocation store to `default` to maintain compatibility with existing test logic.
 

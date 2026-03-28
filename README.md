@@ -1,11 +1,17 @@
 # dotfiles-manager
 
-Back up and sync your dotfiles across machines using git. No new concepts
-to learn — it's just git under the hood, wrapped in a simple CLI.
+A thin, open-source wrapper around git's
+[bare-repo dotfiles pattern](https://www.atlassian.com/git/tutorials/dotfiles).
+It reduces the cognitive load of git plumbing without hiding it. Your files
+stay where they are, tracked in standard git repos — no new abstractions, no
+proprietary formats, no lock-in.
 
-Uses the [Atlassian bare repo pattern](https://www.atlassian.com/git/tutorials/dotfiles):
-your config files stay where they are, git tracks them invisibly, and GitHub
-keeps a versioned backup.
+If you stop using this tool tomorrow, your dotfiles and their full history
+are still right there in git. You can drop to raw `git` commands at any time
+via `dot git`, or walk away entirely with nothing to unwind.
+
+See [Alternatives](docs/ALTERNATIVES.md) for a detailed comparison with the
+manual bare-repo approach and chezmoi.
 
 ## Why
 
