@@ -6,6 +6,7 @@ this file for all stores. Users should track this file in a store
 of their choice (e.g., 'work' or 'secrets') to version it.
 """
 
+import sys
 from pathlib import Path
 from .config import get_work_tree
 
@@ -87,6 +88,16 @@ def init() -> dict:
 
 def add(pattern: str) -> dict:
     """Add a pattern to the global gitignore. Idempotent."""
+    if pattern.startswith("!"):
+        print(
+            "VISIBILITY WARNING: Ignore exceptions ('!') create a blackout for the parent folder.\n"
+            "                   If this directory contains valuable files, consider ignoring\n"
+            "                   its specific siblings instead. This keeps the parent folder\n"
+            "                   'open' so you have a chance to notice and make a conscious\n"
+            "                   choice when new files appear there in the future.\n",
+            file=sys.stderr
+        )
+
     existing = _read_lines()
     if pattern in existing:
         return {"success": True, "added": False, "message": f"Already ignored: {pattern}"}
@@ -106,8 +117,9 @@ def remove(pattern: str) -> dict:
         return {"success": False, "error": "No global gitignore file found."}
 
     existing = _read_lines()
-    if pattern not in existing:
-        return {"success": False, "error": f"Pattern not found: {pattern}"}
+    if pattern in existing:
+        if pattern not in existing:
+            return {"success": False, "error": f"Pattern not found: {pattern}"}
 
     raw_lines = path.read_text().splitlines(keepends=True)
     new_lines = [ln for ln in raw_lines if ln.strip() != pattern]

@@ -111,31 +111,27 @@ def get_status(include_untracked: bool = False, include_ignored: bool = False) -
 
 
 def _get_ignored() -> list[str]:
-    """Find files/dirs ignored by the current store using git status.
+    """Find specific hidden paths ignored by the current store.
     
-    Uses a pathspec to only scan hidden items for maximum performance.
+    Uses ls-files for accurate granularity (e.g. showing .gemini/cache/ 
+    even if .gemini/skills/ is tracked).
     """
     repo_dir = get_repo_dir()
     work_tree = get_work_tree()
-    
-    # Pathspec: . followed by alphanumeric (skips . and ..)
     pathspec = ".[a-zA-Z0-9]*"
     
+    # ls-files is better for showing the actual paths that match ignore rules
     result = subprocess.run(
         ["git", f"--git-dir={repo_dir}", f"--work-tree={work_tree}", 
-         "status", "--ignored", "--porcelain", "--untracked-files=normal", "--", pathspec],
+         "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", 
+         "--", pathspec],
         capture_output=True, text=True, check=False, cwd=work_tree
     )
     
     if result.returncode != 0:
         return []
 
-    ignored = []
-    for line in result.stdout.splitlines():
-        if line.startswith("!! "):
-            ignored.append(line[3:].strip().strip('"'))
-            
-    return sorted(ignored)
+    return sorted([f.strip().strip('"') for f in result.stdout.splitlines() if f.strip()])
 
 
 def _get_cross_store_untracked() -> list[str]:
@@ -150,7 +146,6 @@ def _get_cross_store_untracked() -> list[str]:
     all_stores_info = stores_mod.list_stores()["stores"]
     show_all = os.getenv("DOTGIT_SHOW_ALL") == "1"
     
-    # Pathspec: . followed by alphanumeric (skips . and ..)
     pathspec = ".[a-zA-Z0-9]*"
     
     # 1. Collect all files tracked in OTHER stores

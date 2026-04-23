@@ -211,7 +211,15 @@ If you want to see which **hidden** files or folders you have intentionally excl
 ```bash
 dot status --ignored
 ```
-This is useful for double-checking if a configuration directory you once ignored (like `.npm/` or `.cache/`) now contains something you actually want to track.
+This is useful for auditing your "black boxes"—ensuring that directories you once chose to forget (like `.npm/` or `.cache/`) are still correctly excluded.
+
+> **Pro-Tip: Visibility & "Explicit Siblings"**
+> If a directory appears in the **Ignored** list but also contains files that are **Tracked** (`dot list`), **Modified** (`dot status`), or **Discovered** (Untracked), it is a "Partially Open Box." This happens when you ignore a parent directory but explicitly track or add an exception (`!`) for a specific child.
+>
+> **The Visibility Risk:** Ignoring a parent directory creates a blackout. If new, valuable files are added to that folder later, Git will silently swallow them, and you will never be prompted to make a conscious choice about tracking them.
+>
+> **The Strategy:** For low-noise directories that contain valuable settings (like `.gemini/`), we recommend ignoring **explicit siblings** (the specific files and/or sub-folders you don't want) instead of the parent. This keeps the parent "open" so that any new, important files will surface in `dot status` for your review.
+
 
 ## How It Works
 ...
