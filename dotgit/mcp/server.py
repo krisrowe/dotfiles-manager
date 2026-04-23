@@ -35,29 +35,28 @@ This tool answers three questions:
 1. Is the dotfiles repo initialized on this machine?
 2. Are there local changes to tracked files that haven't been synced?
 3. What files are currently being tracked?
+4. What dotfiles exist in $HOME that are not yet tracked by ANY store? (discovery)
+5. What files are being ignored by the current store?
 
 INTERPRETING RESULTS:
-- initialized=false → The user hasn't set up dotgit yet. Guide them through:
-  first-time setup (dot_track + dot_remote_setup + dot_sync) or restore
-  from existing repo (dot_restore).
-- initialized=true, changes=[] → Everything is clean. If the user wants a
-  backup, call dot_sync to push current state to GitHub.
-- initialized=true, changes=[...] → Files have been modified since last sync.
-  Call dot_sync to commit and push them.
+- initialized=false → The user hasn't set up dotgit yet.
+- changes=[...] → Files have been modified since last sync.
+- untracked=[...] → New dotfiles discovered in $HOME that aren't managed yet.
+- ignored=[...] → Files specifically excluded by gitignore/exclude rules.
 
-NEXT STEPS after calling this:
+NEXT STEPS:
 - If user wants to back up: call dot_sync
-- If user wants to see what's tracked: call dot_list
-- If user wants to add a file: call dot_track
-- If user wants to check remote: call dot_remote_show
+- If user wants to track new files: call dot_track
 
 MULTI-STORE: Pass the store parameter to target a named store.""",
 )
 async def dot_status(
     store: Optional[str] = Field(default=None, description="Target a named store instead of the default."),
+    include_untracked: bool = Field(default=True, description="Discover dotfiles in $HOME not tracked by any store."),
+    include_ignored: bool = Field(default=False, description="List files ignored by the current store."),
 ) -> dict:
     _set_store(store)
-    return sync.get_status()
+    return sync.get_status(include_untracked=include_untracked, include_ignored=include_ignored)
 
 
 @mcp.tool(

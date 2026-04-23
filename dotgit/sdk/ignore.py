@@ -1,24 +1,25 @@
 """Global gitignore management.
 
 Manages patterns in ~/.config/git/ignore (the global gitignore).
-Also syncs patterns to each store's info/exclude.
+Because dotgit uses $HOME as the work tree, Git naturally respects
+this file for all stores. Users should track this file in a store
+of their choice (e.g., 'work' or 'secrets') to version it.
 """
 
 from pathlib import Path
-
 from .config import get_work_tree
-
 
 STANDARD_PATTERNS = [
     ".credentials.json",
     "client_secrets.json",
+    ".DS_Store",
+    "*.pyc",
+    "__pycache__/",
 ]
-
 
 def _ignore_file() -> Path:
     """Path to the global gitignore file."""
     return get_work_tree() / ".config" / "git" / "ignore"
-
 
 def _read_lines() -> list[str]:
     """Read non-comment, non-blank lines."""
@@ -31,7 +32,6 @@ def _read_lines() -> list[str]:
         if ln.strip() and not ln.strip().startswith("#")
     ]
 
-
 def _read_raw() -> str:
     """Read the full file content."""
     path = _ignore_file()
@@ -39,13 +39,11 @@ def _read_raw() -> str:
         return ""
     return path.read_text()
 
-
 def _write(content: str) -> None:
     """Write the ignore file, creating parent dirs if needed."""
     path = _ignore_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
-
 
 def init() -> dict:
     """Ensure global gitignore exists with standard patterns.
@@ -81,15 +79,11 @@ def init() -> dict:
             finally:
                 set_invocation_store(prev_store)
 
-    # Add patterns to each store's info/exclude
-    _sync_to_stores()
-
     return {
         "success": True,
         "added": added,
         "file": str(_ignore_file()),
     }
-
 
 def add(pattern: str) -> dict:
     """Add a pattern to the global gitignore. Idempotent."""
@@ -103,11 +97,7 @@ def add(pattern: str) -> dict:
     raw += pattern + "\n"
     _write(raw)
 
-    # Also add to each store's info/exclude
-    _add_to_stores(pattern)
-
     return {"success": True, "added": True, "pattern": pattern}
-
 
 def remove(pattern: str) -> dict:
     """Remove a pattern from the global gitignore."""
@@ -125,49 +115,7 @@ def remove(pattern: str) -> dict:
 
     return {"success": True, "removed": True, "pattern": pattern}
 
-
 def list_patterns() -> dict:
     """List all patterns in the global gitignore."""
     patterns = _read_lines()
     return {"patterns": patterns, "file": str(_ignore_file())}
-
-
-def _sync_to_stores() -> None:
-    """Add standard patterns to each store's info/exclude."""
-    for pattern in STANDARD_PATTERNS:
-        _add_to_stores(pattern)
-
-
-def _add_to_stores(pattern: str) -> None:
-    """Add a pattern to every store's info/exclude."""
-    from . import stores as stores_mod
-    from .repo import get_exclude_file
-    
-    # Default/Active store
-    try:
-        exclude = get_exclude_file()
-        _add_to_exclude(exclude, pattern)
-    except:
-        pass
-
-    # Named stores
-    data = stores_mod._read_stores()
-    for name, info in data.get("stores", {}).items():
-        repo_path = Path(info.get("repo", "")).expanduser()
-        exclude = repo_path / "info" / "exclude"
-        if exclude.parent.exists():
-            _add_to_exclude(exclude, pattern)
-
-
-def _add_to_exclude(exclude_path: Path, pattern: str) -> None:
-    """Add a pattern to an exclude file if not already present."""
-    if not exclude_path.exists():
-        return
-    content = exclude_path.read_text()
-    existing = [ln.strip() for ln in content.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-    if pattern in existing:
-        return
-    if not content.endswith("\n"):
-        content += "\n"
-    content += pattern + "\n"
-    exclude_path.write_text(content)

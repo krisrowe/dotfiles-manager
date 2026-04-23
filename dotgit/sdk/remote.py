@@ -32,7 +32,7 @@ def discover_remote_stores() -> list[dict]:
 
     # Search for any repo with a topic starting with 'dotfiles-'
     result = subprocess.run(
-        ["gh", "repo", "list", user, "--json", "nameWithOwner,repositoryTopics", "--limit", "100"],
+        ["gh", "repo", "list", user, "--json", "nameWithOwner,repositoryTopics,isPrivate,description", "--limit", "100"],
         capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:
@@ -51,7 +51,9 @@ def discover_remote_stores() -> list[dict]:
                 discovered.append({
                     "repo": r["nameWithOwner"],
                     "store": store_name,
-                    "topic": t
+                    "topic": t,
+                    "private": r.get("isPrivate", True),
+                    "description": r.get("description", "")
                 })
     
     return discovered

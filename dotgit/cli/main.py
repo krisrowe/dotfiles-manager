@@ -86,26 +86,45 @@ def list_files(output_format: str):
 
 
 @main.command()
+@click.option("--untracked/--no-untracked", "show_untracked", default=True,
+              help="Show files untracked by any store (default: true).")
+@click.option("--ignored/--no-ignored", "show_ignored", default=False,
+              help="Show files ignored by the current store.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]),
               default="text")
-def status(output_format: str):
-    """Show modified tracked files."""
+def status(show_untracked: bool, show_ignored: bool, output_format: str):
+    """Show modified tracked files, untracked dotfiles, and ignored files."""
     from ..sdk.config import get_invocation_store, get_active_store
     active = get_invocation_store() or get_active_store() or "default"
     
-    result = sync.get_status()
+    result = sync.get_status(include_untracked=show_untracked, include_ignored=show_ignored)
     if not result["initialized"]:
         click.echo(f"Store '{active}' not initialized. Run 'dot track <path>' to start.", err=True)
         sys.exit(1)
+    
     if output_format == "json":
         click.echo(json.dumps(result, indent=2))
     else:
         click.echo(f"Store: {active}")
+        
+        # Tracked changes
         if not result["changes"]:
-            click.echo("Clean — nothing to sync.")
+            click.echo("  (no modified tracked files)")
         else:
             for c in result["changes"]:
                 click.echo(f"  {c['status']:12s} {c['path']}")
+        
+        # Untracked files
+        if show_untracked and result.get("untracked"):
+            click.echo(f"\nUntracked (not in any store):")
+            for f in result["untracked"]:
+                click.echo(f"  ?            {f}")
+
+        # Ignored files
+        if show_ignored and result.get("ignored"):
+            click.echo(f"\nIgnored by current store:")
+            for f in result["ignored"]:
+                click.echo(f"  I            {f}")
 
 
 @main.command("sync")
@@ -248,7 +267,9 @@ def remote_show():
 
 
 @remote_group.command("available")
-def remote_available():
+@click.option("--max-desc-length", "max_desc", default=30,
+              help="Truncate description to this length (default: 30).")
+def remote_available(max_desc: int):
     """List remote dotfiles repositories discovered by GitHub topics."""
     try:
         results = remote.discover_remote_stores()
@@ -256,10 +277,14 @@ def remote_available():
             click.echo("No remote dotfiles repositories discovered.")
             return
         
-        click.echo(f"{'Repository':40s} {'Store/Topic'}")
-        click.echo("-" * 60)
+        click.echo(f"{'Repository':35s} {'Store':10s} {'Vis':8s} {'Description'}")
+        click.echo("-" * 80)
         for r in results:
-            click.echo(f"{r['repo']:40s} {r['store']}")
+            visibility = "private" if r["private"] else "public"
+            desc = r["description"] or ""
+            if len(desc) > max_desc:
+                desc = desc[:max_desc-3] + "..."
+            click.echo(f"{r['repo']:35s} {r['store']:10s} {visibility:8s} {desc}")
     except Exception as e:
         click.echo(f"Error discovering remotes: {str(e)}", err=True)
         sys.exit(1)

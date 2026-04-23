@@ -4,62 +4,32 @@
 
 The exclude system controls what `dot status` shows — which untracked or
 modified paths surface as needing attention and which are silently ignored.
-This is critical because the work tree is `$HOME`, which contains thousands
-of files the user will never want to track.
 
-### Goals
+#### Strategy: Promote for Privacy
 
-1. **Clean status output.** `dot status` should feel like `git status` in a
-   normal working directory — only actionable items, no noise. Users must be
-   able to suppress entire directory trees (e.g. `~/.cache/`, `~/.local/`)
-   so that genuinely untracked dotfiles are easy to spot.
+Unlike V1, which avoided tracking ignore patterns to prevent leaking machine
+state, V2 embraces **Store Promotion**.
 
-2. **Single CLI workflow.** All exclude management must be available through
-   `dot` CLI and MCP tools, with logic centralized in the SDK layer. Users
-   should not need to switch to a different tool or manually edit git
-   internals to manage exclusions.
+1.  **Version Everything:** The global ignore file (`~/.config/git/ignore`)
+    should be tracked in a dotfiles store to ensure it is portable across
+    machines.
 
-3. **Portable exclusions as a first-class concern.** Building a useful
-   exclude list is a real investment — it takes time to discover which
-   paths under `$HOME` are noise. The tool must treat that investment as
-   something worth preserving: make it easy to export, restore, and carry
-   to new machines without re-doing the work. CLI output, MCP tool
-   descriptions, documentation, and agent skills should actively surface
-   the portability of exclusions so users are aware of it and can act on
-   it. Preservation must be clean, low-friction, and secure — exclude
-   lists must not transit through dotfiles stores, public repos, or
-   any git remote not specifically designated for sensitive content,
-   since the patterns themselves can reveal what exists on a machine.
+2.  **Sensitivity Alignment:** Users should track their ignore file in a
+    store that matches its sensitivity:
+    *   **`work` / `home`**: For general ignores (e.g. `.DS_Store`, `node_modules`).
+    *   **`personal` / `secrets`**: If the ignore file contains patterns
+        that reveal sensitive paths or private projects, promote it to a
+        higher-tier store.
 
-4. **Multi-store awareness.** Multiple stores share `$HOME` as their work
-   tree. The exclude mechanism must account for this — patterns may apply
-   globally or per-store.
+3.  **Git-Native Hierarchy:**
+    *   **Global (`~/.config/git/ignore`)**: Portable patterns that apply
+        to all stores. Managed via `dot ignore`.
+    *   **Local (`.git/info/exclude`)**: Machine-specific or store-specific
+        noise that should never be portable. Managed via `dot exclude`.
 
-### Constraints
-
-1. **No sensitive paths in tracked files.** Exclude patterns can reveal
-   what software, services, or configurations exist on a machine. An exclude
-   list committed to a public (or even private-but-shared) repo could leak
-   the presence of sensitive tooling, personal projects, or confidential
-   work. **Never commit exclude patterns to the dotfiles repo itself.**
-   Exclude files must live in git internals (`info/exclude`) or in
-   out-of-band configuration — not in tracked content.
-
-2. **Use git's native mechanisms.** Git provides `info/exclude` (per-repo,
-   untracked) and `core.excludesFile` / `~/.config/git/ignore` (global,
-   user-managed). The tool should build on these rather than inventing
-   parallel systems. This keeps behavior predictable for users who
-   understand git.
-
-3. **No cross-store side effects.** Adding an exclude pattern to one store
-   must not silently modify another store's configuration. If a pattern
-   should apply to all stores, that is the user's explicit choice, not an
-   automatic sync.
-
-4. **Transparency over magic.** Users should be able to see where patterns
-   are stored and what git mechanism is in effect. The tool reduces
-   cognitive load around git plumbing flags, not around understanding what
-   git is doing.
+4.  **No Logic Fan-out:** The tool no longer duplicates global patterns into
+    every store's internals. Since all stores share `$HOME` as a work tree,
+    they naturally respect the global gitignore path.
 
 ## Architecture
 
@@ -94,9 +64,30 @@ Every path is resolved through `config.py` using this priority:
 ### SDK Primitives
 
 - `repo._git()`: Wraps the `git` command, injecting `--git-dir` and `--work-tree`.
-- `status.showUntrackedFiles = no`: Crucial setting to ensure only explicitly tracked files are visible.
+- `status.showUntrackedFiles = no`: Crucial setting to ensure only explicitly tracked files are visible in raw git. The `dot status` command overrides this dynamically.
 
-## Multiple Stores
+## Lay of the Land (V2 Discovery Philosophy)
+
+The "V2" architecture provides a summarized view of the home directory using native Git optimizations.
+
+1.  **Fast by Default:** `dot status` defaults to showing modified tracked files and **hidden** untracked files (`.*`) at the root of the work tree.
+    *   **Performance:** ~0.1s on a machine with 30GB+ of hidden data.
+    *   **Logic:** Uses a pathspec filter (`.[a-zA-Z0-9]*`) to prevent Git from even attempting to scan massive non-hidden directories (like `Library/` or `Desktop/`).
+
+2.  **Explicit Discovery:** The `--ignored` flag enables Git's full discovery engine. 
+    *   **Performance:** ~2s on a workstation with 32GB of hidden data (primarily `.gemini/` and `.cache/`). This is a significant improvement over unfiltered scans (which take ~13s+).
+    *   **Summarized view:** Uses `--untracked-files=normal` to keep output readable; directories are summarized as single entries unless only specific sub-paths are ignored.
+
+3.  **Cross-Store Awareness:** The untracked list automatically filters out files managed by **any other** registered store.
+
+### How to Piece Together the State
+
+| View | Command | Best For |
+| :--- | :--- | :--- |
+| **Tracked** | `dot list` | Auditing exactly what is being backed up. |
+| **Changes** | `dot status` | Seeing what needs to be synced. |
+| **New Stuff** | `dot status` | Finding hidden dotfiles you forgot to track. |
+| **Full Scan** | `dot status --ignored` | Verifying your ignore rules are working. |
 
 ### Active Store Configuration
 

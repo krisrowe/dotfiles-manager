@@ -41,7 +41,7 @@ def _git(
         cmd.append("core.hooksPath=/dev/null")
     cmd.extend(args)
     return subprocess.run(
-        cmd, capture_output=True, text=True, check=check,
+        cmd, capture_output=True, text=True, check=check, cwd=work_tree
     )
 
 

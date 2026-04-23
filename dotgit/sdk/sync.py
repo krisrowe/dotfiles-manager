@@ -4,6 +4,8 @@ Orchestrates track/untrack/sync/restore workflows using repo primitives.
 """
 
 import subprocess
+import tempfile
+import os
 from pathlib import Path
 
 from .config import get_repo_dir, get_work_tree, require_explicit_store
@@ -79,16 +81,118 @@ def untrack(path: str) -> dict:
     }
 
 
-def get_status() -> dict:
+def get_status(include_untracked: bool = False, include_ignored: bool = False) -> dict:
     """Get status of tracked files. Safe (uses active).
 
-    Returns dict with changed files list.
+    Args:
+        include_untracked: If True, also discover files untracked by ANY store.
+        include_ignored: If True, also show files ignored by the current store.
     """
     require_explicit_store("status")
     if not repo.is_initialized():
-        return {"initialized": False, "changes": []}
+        return {"initialized": False, "changes": [], "untracked": [], "ignored": []}
+    
     changes = repo.status()
-    return {"initialized": True, "changes": changes}
+    untracked = []
+    ignored = []
+
+    if include_untracked:
+        untracked = _get_cross_store_untracked()
+    
+    if include_ignored:
+        ignored = _get_ignored()
+
+    return {
+        "initialized": True, 
+        "changes": changes,
+        "untracked": untracked,
+        "ignored": ignored
+    }
+
+
+def _get_ignored() -> list[str]:
+    """Find files/dirs ignored by the current store using git status.
+    
+    Uses a pathspec to only scan hidden items for maximum performance.
+    """
+    repo_dir = get_repo_dir()
+    work_tree = get_work_tree()
+    
+    # Pathspec: . followed by alphanumeric (skips . and ..)
+    pathspec = ".[a-zA-Z0-9]*"
+    
+    result = subprocess.run(
+        ["git", f"--git-dir={repo_dir}", f"--work-tree={work_tree}", 
+         "status", "--ignored", "--porcelain", "--untracked-files=normal", "--", pathspec],
+        capture_output=True, text=True, check=False, cwd=work_tree
+    )
+    
+    if result.returncode != 0:
+        return []
+
+    ignored = []
+    for line in result.stdout.splitlines():
+        if line.startswith("!! "):
+            ignored.append(line[3:].strip().strip('"'))
+            
+    return sorted(ignored)
+
+
+def _get_cross_store_untracked() -> list[str]:
+    """Find files in $HOME that are not tracked by any registered store.
+    
+    Restricted to hidden files (dotfiles) via pathspec for performance.
+    """
+    from . import stores as stores_mod
+    
+    work_tree = get_work_tree()
+    active_repo = get_repo_dir()
+    all_stores_info = stores_mod.list_stores()["stores"]
+    show_all = os.getenv("DOTGIT_SHOW_ALL") == "1"
+    
+    # Pathspec: . followed by alphanumeric (skips . and ..)
+    pathspec = ".[a-zA-Z0-9]*"
+    
+    # 1. Collect all files tracked in OTHER stores
+    other_tracked = set()
+    store_repos = set()
+    for s in all_stores_info:
+        repo_dir = Path(s["repo"]).expanduser()
+        store_repos.add(repo_dir.name)
+        
+        if repo_dir.resolve() == active_repo.resolve():
+            continue
+            
+        result = subprocess.run(
+            ["git", f"--git-dir={repo_dir}", "ls-files"],
+            capture_output=True, text=True, check=False
+        )
+        if result.returncode == 0:
+            other_tracked.update(result.stdout.splitlines())
+
+    # 2. Use git status --porcelain with pathspec for efficient untracked discovery
+    cmd = ["git", f"--git-dir={active_repo}", f"--work-tree={work_tree}", 
+           "status", "--porcelain", "--untracked-files=normal"]
+    if not show_all:
+        cmd.extend(["--", pathspec])
+
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, check=False, cwd=work_tree
+    )
+    
+    if result.returncode != 0:
+        return []
+
+    truly_untracked = []
+    for line in result.stdout.splitlines():
+        if line.startswith("?? "):
+            path = line[3:].strip().strip('"')
+            # Filter out store repos and files tracked in other stores
+            clean_path = path.rstrip("/")
+            if clean_path not in store_repos and clean_path not in other_tracked:
+                truly_untracked.append(path)
+    
+    return sorted(truly_untracked)
 
 
 def get_list() -> dict:

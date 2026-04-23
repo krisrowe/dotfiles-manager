@@ -184,12 +184,37 @@ The MCP server exposes the same SDK functions as the CLI. All MCP tools accept a
 dot mcp install claude
 ```
 
+## Lay of the Land (Discovery Journey)
+
+Managing a home directory as a work tree can be overwhelming. `dotgit` provides a structured journey to help you get a lay of the land without the noise.
+
+### 1. What am I already backing up?
+Start with `dot list` to see exactly which files and directories are currently tracked in your active store.
+
+```bash
+dot list
+```
+
+### 2. What needs to be synced?
+Use `dot status` to see local modifications to your tracked files. This is your primary "to-do" list before running `dot sync`.
+
+```bash
+dot status
+```
+
+### 3. What dotfiles am I missing?
+`dot status` also automatically surfaces **hidden** files and folders (`.*`) in your home directory that aren't tracked in **any** of your registered stores. This is the fastest way to discover new configuration files that should be backed up.
+
+### 4. How do I verify my ignore rules?
+If you want to see which **hidden** files or folders you have intentionally excluded via your `~/.config/git/ignore` rules, use the `--ignored` flag:
+
+```bash
+dot status --ignored
+```
+This is useful for double-checking if a configuration directory you once ignored (like `.npm/` or `.cache/`) now contains something you actually want to track.
+
 ## How It Works
-
-Each store is a bare git repo (e.g. `~/.dotfiles-work`). Your home directory is the work tree. `showUntrackedFiles = no` means git only sees files you explicitly track.
-
-Every `dot` command translates to
-`git --git-dir=~/.dotfiles-<store> --work-tree=~ <command>`.
+...
 
 ## License
 
