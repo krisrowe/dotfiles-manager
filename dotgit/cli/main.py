@@ -90,13 +90,28 @@ def list_files(output_format: str):
               help="Show files untracked by any store (default: true).")
 @click.option("--ignored/--no-ignored", "show_ignored", default=False,
               help="Show files ignored by the current store.")
+@click.option("--stats", is_flag=True, default=False,
+              help="Show comprehensive statistics for the active environment.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]),
               default="text")
-def status(show_untracked: bool, show_ignored: bool, output_format: str):
+def status(show_untracked: bool, show_ignored: bool, stats: bool, output_format: str):
     """Show modified tracked files, untracked dotfiles, and ignored files."""
     from ..sdk.config import get_invocation_store, get_active_store
     active = get_invocation_store() or get_active_store() or "default"
     
+    if stats:
+        stat_data = sync.get_stats()
+        if output_format == "json":
+            click.echo(json.dumps(stat_data, indent=2))
+        else:
+            click.echo("--- Environment Statistics ---")
+            click.echo("Tracked Files by Store:")
+            for store_name, count in stat_data["stores"].items():
+                click.echo(f"  - {store_name}: {count} file(s)")
+            click.echo(f"\nGlobal Ignore Patterns: {stat_data['global_ignores']}")
+            click.echo(f"Untracked Dotfiles/Folders: {stat_data['untracked']}")
+        return
+
     result = sync.get_status(include_untracked=show_untracked, include_ignored=show_ignored)
     if not result["initialized"]:
         click.echo(f"Store '{active}' not initialized. Run 'dot track <path>' to start.", err=True)

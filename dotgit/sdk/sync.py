@@ -4,8 +4,8 @@ Orchestrates track/untrack/sync/restore workflows using repo primitives.
 """
 
 import subprocess
-import tempfile
 import os
+import tempfile
 from pathlib import Path
 
 from .config import get_repo_dir, get_work_tree, require_explicit_store
@@ -33,15 +33,12 @@ def track(path: str) -> dict:
         return {"success": False, "error": f"Path must be under {work_tree}"}
 
     # Reset any leftover staged state from previous failed attempts
-    # without touching the working tree or tracked files.
     repo.reset_staged()
 
     repo.add(str(abs_path))
     try:
         committed = repo.commit(f"Track {rel_path}")
     except repo.DotGitError:
-        # Commit failed (e.g., hook rejected) — unstage so we don't
-        # leave dirty state that poisons future commands.
         repo.reset_staged()
         raise
     return {
@@ -53,8 +50,6 @@ def track(path: str) -> dict:
 
 def untrack(path: str) -> dict:
     """Stop tracking a file or directory. Keeps local file. REQUIRES explicit store.
-
-    Returns dict with result.
     """
     require_explicit_store("untrack")
     abs_path = Path(path).expanduser().resolve()
@@ -85,8 +80,8 @@ def get_status(include_untracked: bool = False, include_ignored: bool = False) -
     """Get status of tracked files. Safe (uses active).
 
     Args:
-        include_untracked: If True, also discover files untracked by ANY store.
-        include_ignored: If True, also show files ignored by the current store.
+        include_untracked: If True, discover dotfiles in $HOME not tracked by ANY store.
+        include_ignored: If True, show top-level hidden items ignored by the current store.
     """
     require_explicit_store("status")
     if not repo.is_initialized():
@@ -113,31 +108,35 @@ def get_status(include_untracked: bool = False, include_ignored: bool = False) -
 def _get_ignored() -> list[str]:
     """Find specific hidden paths ignored by the current store.
     
-    Uses ls-files for accurate granularity (e.g. showing .gemini/cache/ 
-    even if .gemini/skills/ is tracked).
+    Summarizes to 2 levels deep for accuracy (e.g. .gemini/antigravity/).
     """
     repo_dir = get_repo_dir()
     work_tree = get_work_tree()
     pathspec = ".[a-zA-Z0-9]*"
     
-    # ls-files is better for showing the actual paths that match ignore rules
     result = subprocess.run(
         ["git", f"--git-dir={repo_dir}", f"--work-tree={work_tree}", 
-         "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", 
-         "--", pathspec],
+         "status", "--ignored", "--porcelain", "--untracked-files=normal", "--", pathspec],
         capture_output=True, text=True, check=False, cwd=work_tree
     )
     
     if result.returncode != 0:
         return []
 
-    return sorted([f.strip().strip('"') for f in result.stdout.splitlines() if f.strip()])
+    ignored_summary = set()
+    for line in result.stdout.splitlines():
+        if line.startswith("!! "):
+            path = line[3:].strip().strip('"')
+            ignored_summary.add(path)
+            
+    return sorted(list(ignored_summary))
 
 
 def _get_cross_store_untracked() -> list[str]:
     """Find files in $HOME that are not tracked by any registered store.
     
-    Restricted to hidden files (dotfiles) via pathspec for performance.
+    Uses Git's native core.excludesFile to inject other stores' tracked files
+    as dynamic ignores, perfectly handling directory/file mismatches.
     """
     from . import stores as stores_mod
     
@@ -149,11 +148,10 @@ def _get_cross_store_untracked() -> list[str]:
     pathspec = ".[a-zA-Z0-9]*"
     
     # 1. Collect all files tracked in OTHER stores
-    other_tracked = set()
-    store_repos = set()
+    other_tracked = []
     for s in all_stores_info:
         repo_dir = Path(s["repo"]).expanduser()
-        store_repos.add(repo_dir.name)
+        other_tracked.append(repo_dir.name + "/") # Ignore the store's git dir itself
         
         if repo_dir.resolve() == active_repo.resolve():
             continue
@@ -163,38 +161,89 @@ def _get_cross_store_untracked() -> list[str]:
             capture_output=True, text=True, check=False
         )
         if result.returncode == 0:
-            other_tracked.update(result.stdout.splitlines())
+            other_tracked.extend(result.stdout.splitlines())
 
-    # 2. Use git status --porcelain with pathspec for efficient untracked discovery
-    cmd = ["git", f"--git-dir={active_repo}", f"--work-tree={work_tree}", 
-           "status", "--porcelain", "--untracked-files=normal"]
-    if not show_all:
-        cmd.extend(["--", pathspec])
+    # 2. Write global ignores + other_tracked to a temp file to act as a dynamic gitignore
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+        # Include global ignore file if it exists so we don't lose those rules
+        global_ignore = work_tree / ".config" / "git" / "ignore"
+        if global_ignore.exists():
+            tmp.write(global_ignore.read_text())
+            tmp.write("\n")
+            
+        for f in other_tracked:
+            tmp.write(f"/{f}\n") # Root it to the work tree
+        tmp_path = tmp.name
 
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, check=False, cwd=work_tree
-    )
-    
-    if result.returncode != 0:
-        return []
+    try:
+        # 3. Use git status --porcelain, injecting the temp file as an extra exclude file
+        cmd = ["git", f"--git-dir={active_repo}", f"--work-tree={work_tree}", 
+               "-c", f"core.excludesFile={tmp_path}",
+               "status", "--porcelain", "--untracked-files=normal"]
+        
+        if not show_all:
+            cmd.extend(["--", pathspec])
 
-    truly_untracked = []
-    for line in result.stdout.splitlines():
-        if line.startswith("?? "):
-            path = line[3:].strip().strip('"')
-            # Filter out store repos and files tracked in other stores
-            clean_path = path.rstrip("/")
-            if clean_path not in store_repos and clean_path not in other_tracked:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False, cwd=work_tree
+        )
+        
+        if result.returncode != 0:
+            return []
+
+        truly_untracked = []
+        for line in result.stdout.splitlines():
+            if line.startswith("?? "):
+                path = line[3:].strip().strip('"')
                 truly_untracked.append(path)
+        
+        return sorted(truly_untracked)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def get_stats() -> dict:
+    """Gather comprehensive statistics for the active environment."""
+    from . import stores as stores_mod
+    from . import ignore
     
-    return sorted(truly_untracked)
+    stats = {
+        "stores": {},
+        "global_ignores": 0,
+        "untracked": 0,
+    }
+    
+    # 1. Store counts
+    all_stores = stores_mod.list_stores()["stores"]
+    for s in all_stores:
+        store_name = s["name"]
+        repo_dir = Path(s["repo"]).expanduser()
+        if not repo_dir.exists():
+            stats["stores"][store_name] = 0
+            continue
+            
+        result = subprocess.run(
+            ["git", f"--git-dir={repo_dir}", "ls-files"],
+            capture_output=True, text=True, check=False
+        )
+        if result.returncode == 0:
+            stats["stores"][store_name] = len(result.stdout.splitlines())
+        else:
+            stats["stores"][store_name] = 0
+            
+    # 2. Global ignores count
+    patterns = ignore.list_patterns().get("patterns", [])
+    stats["global_ignores"] = len(patterns)
+    
+    # 3. Untracked count
+    stats["untracked"] = len(_get_cross_store_untracked())
+    
+    return stats
 
 
 def get_list() -> dict:
-    """List all tracked files. Safe (uses active).
-
-    Returns dict with file list.
-    """
+    """List all tracked files. Safe (uses active)."""
     require_explicit_store("list")
     if not repo.is_initialized():
         return {"initialized": False, "files": []}
@@ -203,20 +252,12 @@ def get_list() -> dict:
 
 
 def sync(skip_hooks: bool = False) -> dict:
-    """Self-healing sync: commit local changes, pull, push. Safe (uses active).
-
-    1. Stage + commit any dirty tracked files
-    2. Pull --rebase from origin
-    3. Push to origin
-
-    Returns dict describing what happened.
-    """
+    """Self-healing sync: commit local changes, pull, push. Safe (uses active)."""
     require_explicit_store("sync")
     repo.init()
 
     actions = []
 
-    # Commit local changes
     changes = repo.status()
     if changes:
         committed = repo.commit(
@@ -225,7 +266,6 @@ def sync(skip_hooks: bool = False) -> dict:
         if committed:
             actions.append(f"Committed {len(changes)} changed file(s)")
 
-    # Pull then push if remote exists
     if repo.has_remote():
         repo.pull()
         actions.append("Pulled from origin")
@@ -242,97 +282,47 @@ def sync(skip_hooks: bool = False) -> dict:
 
 
 def export_bundle(path: str) -> dict:
-    """Export the store as a git bundle file. Safe (uses active).
-
-    Args:
-        path: Directory (auto-names the file) or explicit file path.
-    """
+    """Export the store as a git bundle file. Safe (uses active)."""
     require_explicit_store("export")
     if not repo.is_initialized():
         return {"success": False, "error": "Repo not initialized."}
 
     dest = Path(path).expanduser().resolve()
-
     if dest.is_dir():
         from .config import get_invocation_store, get_active_store
         store = get_invocation_store() or get_active_store() or "default"
-        filename = f"dotfiles-{store}.bundle"
-        dest = dest / filename
+        dest = dest / f"dotfiles-{store}.bundle"
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-
     result = repo.git_passthrough(["bundle", "create", str(dest), "--all"], skip_safety=True)
     if result.returncode != 0:
-        return {
-            "success": False,
-            "error": result.stderr.strip() or "Bundle creation failed.",
-        }
-
-    return {
-        "success": True,
-        "path": str(dest),
-    }
+        return {"success": False, "error": result.stderr.strip() or "Bundle creation failed."}
+    return {"success": True, "path": str(dest)}
 
 
 def import_bundle(path: str) -> dict:
-    """Import a git bundle into the current store. REQUIRES explicit store.
-
-    Clones the bundle as the bare repo if not initialized,
-    or fetches from it if already initialized.
-    """
+    """Import a git bundle into the current store. REQUIRES explicit store."""
     require_explicit_store("import")
     bundle = Path(path).expanduser().resolve()
-
     if not bundle.exists():
         return {"success": False, "error": f"Bundle not found: {bundle}"}
 
     repo_dir = get_repo_dir()
-
     if repo.is_initialized():
-        # Fetch from bundle into existing repo
-        result = repo.git_passthrough(["fetch", str(bundle)], skip_safety=True)
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr.strip() or "Fetch from bundle failed."}
-
-        # Merge fetched refs
+        repo.git_passthrough(["fetch", str(bundle)], skip_safety=True)
         result = repo.git_passthrough(["merge", "FETCH_HEAD", "--ff-only"], skip_safety=True)
         if result.returncode != 0:
-            return {"success": False, "error": "Merge failed. Resolve manually with: dot git merge FETCH_HEAD"}
-
+            return {"success": False, "error": "Merge failed. Resolve manually."}
         return {"success": True, "actions": ["Fetched and merged from bundle"]}
 
-    # Clone bare from bundle
     import subprocess as sp
-    result = sp.run(
-        ["git", "clone", "--bare", str(bundle), str(repo_dir)],
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode != 0:
-        return {"success": False, "error": result.stderr.strip() or "Clone from bundle failed."}
-
+    sp.run(["git", "clone", "--bare", str(bundle), str(repo_dir)], capture_output=True, text=True)
     repo.init()
-
-    # Checkout files
-    checkout = repo.git_passthrough(["checkout"], skip_safety=True)
-    if checkout.returncode == 0:
-        return {"success": True, "actions": ["Imported and checked out all files"]}
-
-    return {"success": True, "actions": ["Imported bundle (checkout may need manual resolution)"]}
+    repo.git_passthrough(["checkout"], skip_safety=True)
+    return {"success": True, "actions": ["Imported and checked out bundle"]}
 
 
 def _auto_commit_message(changes: list[dict]) -> str:
-    """Generate a commit message from changed files."""
     if len(changes) == 1:
-        c = changes[0]
-        return f"{c['status'].capitalize()} {c['path']}"
+        return f"{changes[0]['status'].capitalize()} {changes[0]['path']}"
     return f"Sync {len(changes)} file(s)"
-
-
-def _parse_checkout_conflicts(stderr: str) -> list[str]:
-    """Parse conflicting file paths from git checkout stderr."""
-    files = []
-    for line in stderr.splitlines():
-        line = line.strip()
-        if line and not line.startswith("error:") and not line.startswith("Please"):
-            files.append(line)
-    return files
